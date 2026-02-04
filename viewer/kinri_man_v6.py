@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # --- ページ基本設定 ---
-st.set_page_config(page_title="金利ーマン Dashboard v3.6.4", layout="wide")
+st.set_page_config(page_title="金利ーマン Dashboard v3.7.0", layout="wide")
 
 
 # --- 現場専用スタイルシート ---
@@ -560,6 +560,55 @@ def run_hedge_engine(raw, active_exs, levs, t_key):
     return pd.DataFrame(rows)
 
 
+# --- [エンジンC] 単体金利版（各取引所ごとのランキング表示） ---
+def run_single_exchange_engine(raw, active_exs, levs, t_key):
+    """各取引所ごとに金利の高い順にランキング表示"""
+    exchange_data = {ex: [] for ex in active_exs}
+    
+    for ticker, exs in raw.items():
+        for ex_name in active_exs:
+            if ex_name in exs:
+                d = exs[ex_name]
+                rate = d.get('rate', 0)
+                
+                # 金利の絶対値でランキング（正負問わず大きい方が有利）
+                abs_rate = abs(rate)
+                
+                # ポジション方向（金利がプラスならショート、マイナスならロング）
+                position = "S" if rate >= 0 else "L"
+                
+                # 単体取引なのでリスクは当該取引所のボラティリティのみ
+                vol = d.get('v', 0)
+                risk_cfg = {"scalp": 0.9, "hedge": 0.7, "hold": 0.6}[t_key]
+                
+                risks = []
+                for lev in levs:
+                    if lev > d.get('m', 0):
+                        risks.append("MAX")
+                    else:
+                        vol_adjusted = vol / (100 / lev)
+                        risks.append('❌' if vol_adjusted > risk_cfg else ('⚠️' if vol_adjusted > risk_cfg * 0.5 else '✅'))
+                
+                exchange_data[ex_name].append({
+                    "ticker": ticker,
+                    "rate": rate,
+                    "abs_rate": abs_rate,
+                    "position": position,
+                    "price": d.get('p', 0),
+                    "volatility": vol,
+                    "max_lev": d.get('m', 0),
+                    "time": d.get('t', 0),
+                    "remaining_s": d.get('remaining_s', 0),
+                    "risks": risks
+                })
+    
+    # 各取引所ごとに金利の絶対値でソート（デフォルト）
+    for ex_name in exchange_data:
+        exchange_data[ex_name] = sorted(exchange_data[ex_name], key=lambda x: x['abs_rate'], reverse=True)
+    
+    return exchange_data
+
+
 # --- サイドバー構成 ---
 st.sidebar.header("👔 現場コントロール")
 if st.sidebar.button('⚡️ 最新データ更新', use_container_width=True):
@@ -567,7 +616,7 @@ if st.sidebar.button('⚡️ 最新データ更新', use_container_width=True):
     raw, status, ts = fetch_api_snapshot()
     st.session_state.update({'raw': raw, 'api': status, 'update_ts': ts})
 
-mode_ui = st.sidebar.selectbox("📊 プログラム選択", ["同時刻金利版", "時間差ヘッジ"])
+mode_ui = st.sidebar.selectbox("📊 プログラム選択", ["同時刻金利版", "時間差ヘッジ版", "単体金利版"])
 
 st.sidebar.markdown("---")
 tactic_ui = st.sidebar.radio("🔥 戦術判定", ["スキャ", "ヘッジ", "ホールド"])
@@ -602,14 +651,15 @@ st.sidebar.markdown("---")
 margin = st.sidebar.number_input("証拠金 (USDT)", 10, 1000000, 100)
 st.sidebar.markdown("🕹️ **レバレッジ設定**")
 cols = st.sidebar.columns(5)
-levs = [cols[i].number_input(str(i+1), 1, 200, [10, 20, 50, 100, 125][i], key=f"v341_l{i}") for i in range(5)]
+levs = [cols[i].number_input(str(i+1), 1, 200, [10, 20, 50, 100, 125][i], key=f"v370_l{i}") for i in range(5)]
 st.sidebar.markdown("---")
 st.sidebar.markdown("🏦 **対象取引所**")
+sel_bn = st.sidebar.checkbox("BingX", value=True)
 sel_m = st.sidebar.checkbox("MEXC", value=True)
 sel_bt = st.sidebar.checkbox("Bitget", value=True)
-sel_bn = st.sidebar.checkbox("BingX", value=True)
 sel_vr = st.sidebar.checkbox("Variational", value=True)
-active_exs = [ex for ex, s in zip(["MEXC", "Bitget", "BingX", "Variational"], [sel_m, sel_bt, sel_bn, sel_vr]) if s]
+active_exs = [ex for ex, s in zip(["BingX", "MEXC", "Bitget", "Variational"], [sel_bn, sel_m, sel_bt, sel_vr]) if s]
+
 
 
 
@@ -618,10 +668,12 @@ if 'raw' not in st.session_state:
     raw, status, ts = fetch_api_snapshot()
     st.session_state.update({'raw': raw, 'api': status, 'update_ts': ts})
 
-st.markdown(f"<h2>👔 金利ーマン Dashboard <span class='update-ts'>({st.session_state.update_ts} 更新)</span></h2>", unsafe_allow_html=True)
+st.markdown(f"<h2>👔 金利ーマン Dashboard ver.6<span class='update-ts'>({st.session_state.update_ts} 更新)</span></h2>", unsafe_allow_html=True)
 
-if len(active_exs) < 2:
+if len(active_exs) < 2 and mode_ui != "単体金利版":
     st.warning("取引所を2つ以上選択してください。")
+elif len(active_exs) < 1 and mode_ui == "単体金利版":
+    st.warning("取引所を1つ以上選択してください。")
 else:
     if mode_ui == "同時刻金利版":
         df = run_simultaneous_engine(st.session_state.raw, active_exs, levs, t_key)
@@ -703,7 +755,7 @@ else:
         else:
             st.info(f"{mode_ui} のロジックに適合する銘柄が現在ありません。")
     
-    else:  # ヘッジ版は従来通り
+    elif mode_ui == "時間差ヘッジ版":
         df = run_hedge_engine(st.session_state.raw, active_exs, levs, t_key)
         col1_label, col2_label = "拠点側 (金利源)", "ヘッジ側 (価格固定用)"
         
@@ -728,4 +780,73 @@ else:
             st.markdown(f"<table class='report-table'>{h}{b}</tbody></table>", unsafe_allow_html=True)
         else:
             st.info(f"{mode_ui} のロジックに適合する銘柄が現在ありません。")
-
+    
+    else:  # 単体金利版（新規追加）
+        # 並び順の選択UI
+        sort_mode = st.radio(
+            "📊 並び順",
+            ["金利の高い順", "配布時間の近い順"],
+            horizontal=True,
+            key="single_sort_mode"
+        )
+        
+        exchange_data = run_single_exchange_engine(st.session_state.raw, active_exs, levs, t_key)
+        
+        # タブで各取引所を表示
+        tabs = st.tabs([f"🏦 {ex}" for ex in active_exs])
+        
+        for idx, ex_name in enumerate(active_exs):
+            with tabs[idx]:
+                rows = exchange_data[ex_name]
+                
+                # ソート処理
+                if sort_mode == "金利の高い順":
+                    rows = sorted(rows, key=lambda x: x['abs_rate'], reverse=True)
+                else:  # 配布時間の近い順
+                    rows = sorted(rows, key=lambda x: x.get('remaining_s', 999999))
+                
+                rows = rows[:40]  # 上位40件
+                
+                if len(rows) == 0:
+                    st.info(f"{ex_name} に該当する銘柄がありません")
+                    continue
+                
+                # テーブルヘッダー
+                h = f"<thead><tr><th>順位</th><th>銘柄</th><th>金利率</th><th>方向</th><th>配布時刻</th>" + "".join([f"<th>{l}倍</th>" for l in levs]) + "</tr></thead>"
+                b = "<tbody>"
+                
+                for rank, r in enumerate(rows, 1):
+                    # レバレッジごとの利益とリスク
+                    l_cells = "".join(
+                        [f"<td style='color:#94a3b8;font-size:0.8em'>MAX</td>" if r['risks'][i] == "MAX"
+                         else f"<td><span class='lev-amount'>${margin * levs[i] * (r['abs_rate'] / 100):.1f}</span><br>{r['risks'][i]}</td>"
+                         for i in range(5)]
+                    )
+                    
+                    # 配布時刻の表示（色分け強化）
+                    rem_s = r.get('remaining_s', 0)
+                    if rem_s > 0:
+                        time_str = fmt_rem(rem_s)
+                        if rem_s <= 1800:  # 30分以内：⚡赤背景
+                            time_display = f"<span style='background:#fee2e2;color:#dc2626;padding:3px 8px;border-radius:4px;font-weight:700;font-size:0.9em'>⚡{time_str}</span>"
+                        elif rem_s <= 3600:  # 1時間以内：⏰黄背景
+                            time_display = f"<span style='background:#fef3c7;color:#d97706;padding:3px 8px;border-radius:4px;font-weight:700;font-size:0.9em'>⏰{time_str}</span>"
+                        else:
+                            time_display = f"<span class='dist-time'>{time_str}</span>"
+                    elif r['time'] > 0:
+                        time_display = f"<span class='dist-time'>{int(r['time'])}:00 配布</span>"
+                    else:
+                        time_display = "<span class='dist-time'>不明</span>"
+                    
+                    # 金利率の色分け（プラスは赤、マイナスは青）
+                    rate_color = "#dc2626" if r['rate'] >= 0 else "#2563eb"
+                    
+                    b += f"<tr><td><strong>{rank}</strong></td>" \
+                         f"<td><span class='ticker-text'>{r['ticker']}</span></td>" \
+                         f"<td><span class='rate-val' style='color:{rate_color}'>{r['rate']:.3f}%</span></td>" \
+                         f"<td><span style='font-weight:700;font-size:1.2em'>{r['position']}</span></td>" \
+                         f"<td>{time_display}</td>" \
+                         f"{l_cells}</tr>"
+                
+                b += "</tbody>"
+                st.markdown(f"<table class='report-table'>{h}{b}</table>", unsafe_allow_html=True)
