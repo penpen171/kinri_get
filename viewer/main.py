@@ -8,7 +8,7 @@ from modules.data_api import fetch_api_snapshot
 from modules.mode_simultaneous import render_simultaneous_mode
 from modules.mode_time_diff import render_time_diff_mode
 from modules.mode_single import render_single_mode
-from modules.user_settings import init_settings, save_settings_to_browser
+from modules.user_settings import load_settings, save_settings
 
 
 # --- ページ基本設定 ---
@@ -33,20 +33,11 @@ st.markdown("""
 
 
 # --- サイドバー構成 ---
-# --- サイドバー構成 ---
 st.sidebar.header("👔 現場コントロール")
 
-# 設定のデフォルト値
-DEFAULT_SETTINGS = {
-    "margin": 100,
-    "levs": [10, 20, 50, 100, 125],
-    "tactic": "スキャ",
-    "exchanges": {"BingX": True, "MEXC": True, "Bitget": True, "Variational": True}
-}
-
-# 初回のみsession_stateに保存
+# 設定をファイルから読み込み（初回のみ）
 if 'user_settings' not in st.session_state:
-    st.session_state.user_settings = DEFAULT_SETTINGS.copy()
+    st.session_state.user_settings = load_settings()
 
 settings = st.session_state.user_settings
 
@@ -112,14 +103,18 @@ sel_bt = st.sidebar.checkbox("Bitget", value=saved_exchanges.get("Bitget", True)
 sel_vr = st.sidebar.checkbox("Variational", value=saved_exchanges.get("Variational", True), key="ex_vr")
 active_exs = [ex for ex, s in zip(["BingX", "MEXC", "Bitget", "Variational"], [sel_bn, sel_m, sel_bt, sel_vr]) if s]
 
-# 設定をsession_stateに保存（次回起動時の初期値に）
-st.session_state.user_settings = {
+# 設定の変更を検知して保存
+current_settings = {
     "margin": margin,
     "levs": levs,
     "tactic": tactic_ui,
     "exchanges": {"BingX": sel_bn, "MEXC": sel_m, "Bitget": sel_bt, "Variational": sel_vr}
 }
 
+# 設定が変更されていたらファイルに保存
+if current_settings != st.session_state.user_settings:
+    st.session_state.user_settings = current_settings
+    save_settings(margin, levs, tactic_ui, current_settings["exchanges"])
 
 
 
