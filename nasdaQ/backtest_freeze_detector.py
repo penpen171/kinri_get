@@ -1,14 +1,16 @@
-# backtest_specific_time.py
-# 特定の日時のデータを分析
+# backtest_freeze_detector_v2.py
+# v2 APIで過去データを取得してバックテスト
 
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import deque
 import statistics
 
 BASE_URL = "https://open-api.bingx.com"
-ENDPOINT = "/openApi/swap/v3/quote/klines"
+ENDPOINT_V2 = "/openApi/swap/v2/quote/klines"  # v2を使用
+JST = timezone(timedelta(hours=9))
+
 
 class BacktestFreezeDetector:
     """バックテスト用の停止検知器"""
@@ -104,111 +106,80 @@ class BacktestFreezeDetector:
             'freeze_score': freeze_score,
             'consecutive': self.consecutive_high_scores,
             'state': self.state,
-            'detection_msg': detection_msg,
-            'baseline_vol': statistics.median(self.volatility_history) if len(self.volatility_history) >= 20 else 0
+            'detection_msg': detection_msg
         }
 
 
-def fetch_data_around_time(symbol, target_time_str):
-    """指定時刻の前後のデータを取得"""
-    target_time = datetime.strptime(target_time_str, "%Y-%m-%d %H:%M")
-    
-    print("=" * 80)
-    print(f"📥 データ取得: {target_time.strftime('%Y年%m月%d日 %H:%M')} の前後")
-    print("=" * 80)
-    
-    # 目標時刻の2時間前から1時間後までのデータを取得
-    start_time = target_time - timedelta(hours=2)
-    end_time = target_time + timedelta(hours=1)
-    
-    # まず現在時刻との差を計算
-    now = datetime.now()
-    hours_ago = (now - target_time).total_seconds() / 3600
-    
-    print(f"   目標時刻: {target_time.strftime('%Y-%m-%d %H:%M')}")
-    print(f"   現在時刻: {now.strftime('%Y-%m-%d %H:%M')}")
-    print(f"   差分: 約{hours_ago:.1f}時間前")
-    
-    # 現在から逆算して必要な本数を計算
-    # 目標時刻の2時間前から1時間後 = 3時間分 = 180本
-    minutes_needed = int((now - start_time).total_seconds() / 60)
-    
-    print(f"   取得必要本数: {minutes_needed}本（約{minutes_needed/60:.1f}時間分）")
+def get_klines_v2(symbol, start_time, end_time):
+    """v2 APIでKラインを取得"""
+    url = BASE_URL + ENDPOINT_V2
+    params = {
+        "symbol": symbol,
+        "interval": "1m",
+        "startTime": int(start_time.timestamp() * 1000),
+        "endTime": int(end_time.timestamp() * 1000),
+        "limit": 1440
+    }
     
     try:
-        # 可能な限り多くのデータを取得
-        limit = min(minutes_needed, 1000)
-        
-        params = {
-            "symbol": symbol,
-            "interval": "1m",
-            "limit": limit
-        }
-        
-        print(f"\n   APIリクエスト: limit={limit}")
-        
-        response = requests.get(f"{BASE_URL}{ENDPOINT}", params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
         if data.get("code") == 0 and data.get("data"):
-            all_candles = []
-            for c in data['data']:
-                candle_time = datetime.fromtimestamp(int(c['time']) / 1000)
-                candle = {
-                    'timestamp': candle_time,
-                    'open': float(c['open']),
-                    'high': float(c['high']),
-                    'low': float(c['low']),
-                    'close': float(c['close']),
-                    'volume': float(c.get('volume', 0))
-                }
-                all_candles.append(candle)
-            
-            # 時刻でフィルタリング
-            filtered_candles = [c for c in all_candles if start_time <= c['timestamp'] <= end_time]
-            
-            print(f"\n✅ 取得成功:")
-            print(f"   全取得: {len(all_candles)}本")
-            if all_candles:
-                print(f"   最古: {all_candles[0]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"   最新: {all_candles[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-            
-            print(f"   目標範囲内: {len(filtered_candles)}本")
-            if filtered_candles:
-                print(f"   範囲: {filtered_candles[0]['timestamp'].strftime('%H:%M')} ～ {filtered_candles[-1]['timestamp'].strftime('%H:%M')}")
-            
-            if len(filtered_candles) > 0:
-                return filtered_candles
-            else:
-                print("\n⚠️ 目標時刻のデータが範囲外です。全データを返します。")
-                return all_candles
+            candles = []
+            for kline in data["data"]:
+                ts = int(kline["time"])
+                dt_utc = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+                dt_jst = dt_utc.astimezone(JST)
                 
+                candle = {
+                    'timestamp': dt_jst,
+                    'open': float(kline['open']),
+                    'high': float(kline['high']),
+                    'low': float(kline['low']),
+                    'close': float(kline['close']),
+                    'volume': float(kline.get('volume', 0))
+                }
+                candles.append(candle)
+            
+            return candles
         else:
-            print(f"\n❌ APIエラー: {data}")
-            return None
+            print(f"  APIエラー: {data}")
+            return []
             
     except Exception as e:
-        print(f"\n❌ 例外エラー: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+        print(f"  接続エラー: {e}")
+        return []
 
 
-def run_analysis(symbol, name, target_time_str):
-    """分析実行"""
+def run_backtest_specific_date(symbol, name, target_date_str, start_hour=10, end_hour=11):
+    """特定の日時のデータでバックテスト"""
     print("=" * 80)
     print(f"🔬 バックテスト: {name}")
-    print(f"   目標時刻: {target_time_str}")
+    print(f"   対象日: {target_date_str}")
+    print(f"   時間帯: {start_hour}:00 ～ {end_hour}:00")
     print("=" * 80)
     
-    # データ取得
-    candles = fetch_data_around_time(symbol, target_time_str)
+    # 日時をパース（JST）
+    target_date = datetime.strptime(target_date_str, "%Y-%m-%d")
+    target_date = target_date.replace(tzinfo=JST)
     
-    if not candles or len(candles) < 30:
-        print("\n❌ 十分なデータが取得できませんでした")
+    # ベースライン確立のため2時間前から取得
+    start_time = target_date.replace(hour=start_hour-2, minute=0, second=0)
+    end_time = target_date.replace(hour=end_hour, minute=0, second=0)
+    
+    print(f"\n📥 データ取得中: {start_time.strftime('%Y-%m-%d %H:%M')} ～ {end_time.strftime('%Y-%m-%d %H:%M')}")
+    
+    # v2 APIでデータ取得
+    candles = get_klines_v2(symbol, start_time, end_time)
+    
+    if not candles:
+        print("❌ データ取得失敗")
         return
     
-    target_time = datetime.strptime(target_time_str, "%Y-%m-%d %H:%M")
+    print(f"✅ {len(candles)}本のローソク足を取得")
+    print(f"   最古: {candles[0]['timestamp'].strftime('%m/%d %H:%M:%S')}")
+    print(f"   最新: {candles[-1]['timestamp'].strftime('%m/%d %H:%M:%S')}")
     
     # 検知器で分析
     print("\n" + "=" * 80)
@@ -218,9 +189,11 @@ def run_analysis(symbol, name, target_time_str):
     detector = BacktestFreezeDetector(symbol, name)
     
     events = []
+    all_results = []
     
     for i, candle in enumerate(candles):
         result = detector.analyze_candle(candle, i)
+        all_results.append(result)
         
         # 重要なイベントを記録
         if result['detection_msg']:
@@ -230,26 +203,19 @@ def run_analysis(symbol, name, target_time_str):
             print(f"   スコア: {result['freeze_score']}")
             print(f"   連続: {result['consecutive']}回")
     
-    # 目標時刻の前後30分を詳細表示
+    # 対象時間帯の詳細表示
     print("\n" + "=" * 80)
-    print(f"📋 目標時刻({target_time.strftime('%H:%M')})前後の詳細")
+    print(f"📋 対象時間帯({start_hour}:00-{end_hour}:00)の詳細")
     print("=" * 80)
     
-    window_start = target_time - timedelta(minutes=30)
-    window_end = target_time + timedelta(minutes=30)
+    target_start = target_date.replace(hour=start_hour, minute=0)
+    target_end = target_date.replace(hour=end_hour, minute=0)
     
-    detector2 = BacktestFreezeDetector(symbol, name)
-    
-    for i, candle in enumerate(candles):
-        result = detector2.analyze_candle(candle, i)
-        
-        if window_start <= candle['timestamp'] <= window_end:
+    for result in all_results:
+        if target_start <= result['timestamp'] <= target_end:
             status_icon = "🔴" if result['state'] == "CONFIRMED" else "🟡" if result['state'] == "SUSPECTED" else "🟢"
             
-            # 目標時刻付近は★マーク
-            time_mark = "★" if abs((candle['timestamp'] - target_time).total_seconds()) < 300 else " "
-            
-            print(f"{status_icon}{time_mark} [{result['timestamp'].strftime('%H:%M:%S')}] "
+            print(f"{status_icon} [{result['timestamp'].strftime('%H:%M:%S')}] "
                   f"価格:{result['price']:8.2f} | "
                   f"実体:{result['body']:6.4f} | "
                   f"レンジ:{result['hl_range']:6.4f} | "
@@ -264,12 +230,20 @@ def run_analysis(symbol, name, target_time_str):
         print("=" * 80)
         for event in events:
             print(f"  {event['timestamp'].strftime('%m/%d %H:%M')} - {event['detection_msg']}")
+    else:
+        print("\n  ℹ️  この時間帯に停止イベントは検出されませんでした")
+    
+    print("\n" + "=" * 80)
+    print("✅ バックテスト完了")
+    print("=" * 80)
 
 
 if __name__ == "__main__":
-    # 2026年2月3日 5:05頃を分析
+    # 画像の日時（2026-01-29 10:20頃）でテスト
     TARGET_SYMBOL = "NCSINASDAQ1002USD-USDT"
     TARGET_NAME = "NASDAQ100"
-    TARGET_TIME = "2026-02-03 05:05"
+    TARGET_DATE = "2026-01-29"
+    START_HOUR = 10  # 10:00から
+    END_HOUR = 11    # 11:00まで
     
-    run_analysis(TARGET_SYMBOL, TARGET_NAME, TARGET_TIME)
+    run_backtest_specific_date(TARGET_SYMBOL, TARGET_NAME, TARGET_DATE, START_HOUR, END_HOUR)
