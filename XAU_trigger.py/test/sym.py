@@ -1,4 +1,5 @@
 import requests
+from config import API_KEY, SECRET_KEY, SYMBOL, BASE_URL
 
 # APIのベースURL
 BASE_URL = "https://open-api.bingx.com"

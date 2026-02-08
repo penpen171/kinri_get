@@ -1,0 +1,5 @@
+# config.py
+API_KEY = "VrjIg16ORbQfSgFwjHt0yC2V6taekTSZ8eNPCS7Dpwhxfy7azBlQk68DC5OD9s6BGf3oOAywOKyq6F90kPQ"
+SECRET_KEY = "t3lz7ALUX69aFQ1fXrdHorJmMlIYhlcXQcVSoG8RfgxFi6DNsBLqvBxCrA9oJLZeo9AoCNREqA6aFzU84g"
+SYMBOL = "XAUT-USDT"
+BASE_URL = "https://open-api.bingx.com"

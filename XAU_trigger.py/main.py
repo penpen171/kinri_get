@@ -4,14 +4,11 @@ import time
 import requests
 import schedule
 from datetime import datetime
+from config import API_KEY, SECRET_KEY, BASE_URL
 
 # ============================================
 # 設定項目
 # ============================================
-
-# API認証情報
-API_KEY = "VrjIg16ORbQfSgFwjHt0yC2V6taekTSZ8eNPCS7Dpwhxfy7azBlQk68DC5OD9s6BGf3oOAywOKyq6F90kPQ"
-SECRET_KEY = "t3lz7ALUX69aFQ1fXrdHorJmMlIYhlcXQcVSoG8RfgxFi6DNsBLqvBxCrA9oJLZeo9AoCNREqA6aFzU84g"
 
 # 取引設定
 SYMBOL = "XAUT-USDT"  # 通貨ペア
@@ -19,7 +16,7 @@ SYMBOL = "XAUT-USDT"  # 通貨ペア
 # 証拠金ベースの設定
 USE_MARGIN_MODE = True  # True: 証拠金ベース, False: 固定数量
 MARGIN_AMOUNT = 1.0  # 使用する証拠金額（ドル）
-QUANTITY = 0.01  # USE_MARGIN_MODE=Falseの時の固定数量
+QUANTITY = 0.001  # USE_MARGIN_MODE=Falseの時の固定数量
 
 # レバレッジ設定
 LEVERAGE = 50  # レバレッジ倍率（1-125）
@@ -29,45 +26,52 @@ LEVERAGE_SIDE = "BOTH"  # BOTH（片建て）, LONG（両建てロング）, SHO
 MARGIN_TYPE = "ISOLATED"  # ISOLATED（分離）または CROSSED（クロス）
 
 # トリガー注文設定（現在価格からの幅：ドル）
-TRIGGER_OFFSET_LONG = 5.00  # ロングのトリガー幅（現在価格 + 50ドル）
-TRIGGER_OFFSET_SHORT = -5.00  # ショートのトリガー幅（現在価格 - 50ドル）
+TRIGGER_OFFSET_LONG = 5.0  # ロングのトリガー幅
+TRIGGER_OFFSET_SHORT = -5.0  # ショートのトリガー幅
 
-# 損切り設定（現在価格からの幅：ドル）
-STOP_LOSS_OFFSET_LONG = -1.00  # ロング損切り幅（現在価格 - 30ドル）
-STOP_LOSS_OFFSET_SHORT = 1.00  # ショート損切り幅（現在価格 + 30ドル）
+# ============================================
+# 損切り設定モード
+# ============================================
+# 選択肢: "NONE" (設定なし), "FIXED_OFFSET" (固定幅), "PERCENTAGE" (パーセント), "LOSS_AMOUNT" (損失額)
+STOP_LOSS_MODE = "PERCENTAGE"
 
-# 利確設定（現在価格からの幅：ドル、オプション）
-TAKE_PROFIT_OFFSET_LONG = None  # ロング利確幅（使用しない場合はNone）
-TAKE_PROFIT_OFFSET_SHORT = None  # ショート利確幅（使用しない場合はNone）
+# 1. 固定幅モード (FIXED_OFFSET) - 現在価格からの幅をドルで指定
+STOP_LOSS_OFFSET_LONG = -1.0  # ロング損切り幅（ドル）例：現在価格-1ドル
+STOP_LOSS_OFFSET_SHORT = 1.0  # ショート損切り幅（ドル）例：現在価格+1ドル
 
-# 別の設定方法：比率で指定する場合
-USE_RATIO_MODE = False  # True: 比率モード, False: 固定幅モード
-TRIGGER_RATIO_LONG = 1/10000  # ロングトリガー比率（0.01%）
-TRIGGER_RATIO_SHORT = -1/10000  # ショートトリガー比率（-0.01%）
-STOP_LOSS_RATIO_LONG = -1/5000  # ロング損切り比率（-0.02%）
-STOP_LOSS_RATIO_SHORT = 1/5000  # ショート損切り比率（0.02%）
+# 2. パーセントモード (PERCENTAGE) - 現在価格からのパーセントで指定
+STOP_LOSS_PERCENTAGE_LONG = -10.0  # ロング損切り（%）例：-0.5% = 現在価格の0.5%下
+STOP_LOSS_PERCENTAGE_SHORT = 10.0  # ショート損切り（%）例：+0.5% = 現在価格の0.5%上
+
+# 3. 損失額モード (LOSS_AMOUNT) - 許容する損失額をドルで指定
+MAX_LOSS_AMOUNT_LONG = 5.0  # ロングの最大損失額（ドル）
+MAX_LOSS_AMOUNT_SHORT = 5.0  # ショートの最大損失額（ドル）
+
+# 利確設定（オプション）
+TAKE_PROFIT_OFFSET_LONG = None
+TAKE_PROFIT_OFFSET_SHORT = None
+
+# 比率モード（トリガー注文用）
+USE_RATIO_MODE = False
+TRIGGER_RATIO_LONG = 1/10000
+TRIGGER_RATIO_SHORT = -1/10000
 
 # スケジュール設定
-SCHEDULE_TIME = "07:52"  # 実行時刻（HH:MM形式）
+SCHEDULE_TIME = "07:54"  # 実行時刻（HH:MM形式）
 USE_SCHEDULE = False  # True: スケジュール実行, False: 即時実行
 
-# 価格タイプ
-PRICE_TYPE = "LAST_PRICE"  # LAST_PRICE, MARK_PRICE, INDEX_PRICE
-
-# 小数点以下の桁数
-PRICE_DECIMALS = 1  # 価格精度: 1桁
-QUANTITY_DECIMALS = 6  # 数量精度: 6桁
-MIN_QUANTITY = 0.000001  # 最小注文数量単位
+# 価格設定
+PRICE_TYPE = "MARK_PRICE"  # MARK_PRICE または CONTRACT_PRICE
+PRICE_DECIMALS = 1
+QUANTITY_DECIMALS = 6
+MIN_QUANTITY = 0.000001
 
 # ============================================
-# API接続設定
+# 関数定義
 # ============================================
 
-BASE_URL = "https://open-api.bingx.com"
-
-def generate_signature(params, secret_key):
-    """APIシグネチャを生成"""
-    query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+def generate_signature(query_string, secret_key):
+    """署名を生成"""
     signature = hmac.new(
         secret_key.encode('utf-8'),
         query_string.encode('utf-8'),
@@ -96,192 +100,169 @@ def calculate_quantity(current_price, margin_amount, leverage):
     """証拠金から数量を計算"""
     position_value = margin_amount * leverage
     quantity = position_value / current_price
-    
-    # 最小数量単位に合わせて調整
     quantity = round(quantity / MIN_QUANTITY) * MIN_QUANTITY
     quantity = round(quantity, QUANTITY_DECIMALS)
-    
     return quantity
 
-def set_leverage(symbol, side, leverage):
-    """レバレッジを設定"""
-    timestamp = int(time.time() * 1000)
+def calculate_stop_loss_prices(current_price, quantity):
+    """損切り価格を計算（4つのモードに対応）"""
     
-    params = {
-        "symbol": symbol,
-        "side": side,  # BOTH, LONG, SHORT
-        "leverage": leverage,
-        "timestamp": timestamp
-    }
+    if STOP_LOSS_MODE == "NONE":
+        # モード0: 損切り設定なし
+        print(f"\n  【損切り設定: なし】")
+        print(f"    損切り注文は発注されません")
+        return None
     
-    signature = generate_signature(params, SECRET_KEY)
-    params["signature"] = signature
-    
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    
-    url = f"{BASE_URL}/openApi/swap/v2/trade/leverage"
-    
-    try:
-        response = requests.post(url, params=params, headers=headers)
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-def set_margin_type(symbol, margin_type):
-    """証拠金モードを設定"""
-    timestamp = int(time.time() * 1000)
-    
-    params = {
-        "symbol": symbol,
-        "marginType": margin_type,  # ISOLATED または CROSSED
-        "timestamp": timestamp
-    }
-    
-    signature = generate_signature(params, SECRET_KEY)
-    params["signature"] = signature
-    
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    
-    url = f"{BASE_URL}/openApi/swap/v2/trade/marginType"
-    
-    try:
-        response = requests.post(url, params=params, headers=headers)
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-def calculate_prices(current_price):
-    """現在価格から各注文価格を計算"""
-    if USE_RATIO_MODE:
-        # 比率モード
-        trigger_long = current_price * (1 + TRIGGER_RATIO_LONG)
-        trigger_short = current_price * (1 + TRIGGER_RATIO_SHORT)
-        sl_long = current_price * (1 + STOP_LOSS_RATIO_LONG)
-        sl_short = current_price * (1 + STOP_LOSS_RATIO_SHORT)
-        
-        tp_long = None
-        tp_short = None
-        if TAKE_PROFIT_OFFSET_LONG is not None:
-            tp_long = current_price * (1 + TAKE_PROFIT_OFFSET_LONG)
-        if TAKE_PROFIT_OFFSET_SHORT is not None:
-            tp_short = current_price * (1 + TAKE_PROFIT_OFFSET_SHORT)
-    else:
-        # 固定幅モード
-        trigger_long = current_price + TRIGGER_OFFSET_LONG
-        trigger_short = current_price + TRIGGER_OFFSET_SHORT
+    elif STOP_LOSS_MODE == "FIXED_OFFSET":
+        # モード1: 固定幅（ドル）
         sl_long = current_price + STOP_LOSS_OFFSET_LONG
         sl_short = current_price + STOP_LOSS_OFFSET_SHORT
         
-        tp_long = None
-        tp_short = None
-        if TAKE_PROFIT_OFFSET_LONG is not None:
-            tp_long = current_price + TAKE_PROFIT_OFFSET_LONG
-        if TAKE_PROFIT_OFFSET_SHORT is not None:
-            tp_short = current_price + TAKE_PROFIT_OFFSET_SHORT
+        print(f"\n  【損切り設定: 固定幅モード】")
+        print(f"    ロング: 現在価格 {STOP_LOSS_OFFSET_LONG:+.1f}ドル = {sl_long:.1f}")
+        print(f"    ショート: 現在価格 {STOP_LOSS_OFFSET_SHORT:+.1f}ドル = {sl_short:.1f}")
+        
+    elif STOP_LOSS_MODE == "PERCENTAGE":
+        # モード2: パーセント
+        sl_long = current_price * (1 + STOP_LOSS_PERCENTAGE_LONG / 100)
+        sl_short = current_price * (1 + STOP_LOSS_PERCENTAGE_SHORT / 100)
+        
+        print(f"\n  【損切り設定: パーセントモード】")
+        print(f"    ロング: 現在価格 {STOP_LOSS_PERCENTAGE_LONG:+.2f}% = {sl_long:.1f}")
+        print(f"    ショート: 現在価格 {STOP_LOSS_PERCENTAGE_SHORT:+.2f}% = {sl_short:.1f}")
+        
+    elif STOP_LOSS_MODE == "LOSS_AMOUNT":
+        # モード3: 損失額
+        price_move_long = MAX_LOSS_AMOUNT_LONG / (quantity * LEVERAGE)
+        price_move_short = MAX_LOSS_AMOUNT_SHORT / (quantity * LEVERAGE)
+        
+        sl_long = current_price - price_move_long
+        sl_short = current_price + price_move_short
+        
+        print(f"\n  【損切り設定: 損失額モード】")
+        print(f"    ロング: 最大損失 ${MAX_LOSS_AMOUNT_LONG} → 損切り価格 {sl_long:.1f}")
+        print(f"    ショート: 最大損失 ${MAX_LOSS_AMOUNT_SHORT} → 損切り価格 {sl_short:.1f}")
+        print(f"    (数量: {quantity}, レバレッジ: {LEVERAGE}x を考慮)")
+        
+    else:
+        raise ValueError(f"無効な損切りモード: {STOP_LOSS_MODE}")
     
-    # 小数点以下を丸める
     return {
-        'trigger_long': round(trigger_long, PRICE_DECIMALS),
-        'trigger_short': round(trigger_short, PRICE_DECIMALS),
         'sl_long': round(sl_long, PRICE_DECIMALS),
-        'sl_short': round(sl_short, PRICE_DECIMALS),
-        'tp_long': round(tp_long, PRICE_DECIMALS) if tp_long else None,
-        'tp_short': round(tp_short, PRICE_DECIMALS) if tp_short else None
+        'sl_short': round(sl_short, PRICE_DECIMALS)
     }
 
-def place_trigger_order(symbol, side, quantity, stop_price, price_type="LAST_PRICE"):
-    """トリガー成行注文を発注"""
-    timestamp = int(time.time() * 1000)
+def set_leverage(symbol, side, leverage):
+    """レバレッジを設定（両建て対応）"""
+    timestamp = str(int(time.time() * 1000))
+    
+    # 両建てモードの場合、LONGとSHORTを個別に設定
+    if side == "BOTH":
+        results = []
+        for position_side in ["LONG", "SHORT"]:
+            params = {
+                "symbol": symbol,
+                "side": position_side,
+                "leverage": str(leverage),
+                "timestamp": str(int(time.time() * 1000))  # タイムスタンプを更新
+            }
+            
+            query_string = "&".join([f"{k}={params[k]}" for k in sorted(params.keys())])
+            signature = generate_signature(query_string, SECRET_KEY)
+            
+            headers = {"X-BX-APIKEY": API_KEY}
+            url = f"{BASE_URL}/openApi/swap/v2/trade/leverage?{query_string}&signature={signature}"
+            
+            try:
+                response = requests.post(url, headers=headers)
+                results.append({position_side: response.json()})
+                time.sleep(0.1)  # API制限対策
+            except Exception as e:
+                results.append({position_side: {"error": str(e)}})
+        
+        return {"BOTH": results}
+    else:
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "leverage": str(leverage),
+            "timestamp": timestamp
+        }
+        
+        query_string = "&".join([f"{k}={params[k]}" for k in sorted(params.keys())])
+        signature = generate_signature(query_string, SECRET_KEY)
+        
+        headers = {"X-BX-APIKEY": API_KEY}
+        url = f"{BASE_URL}/openApi/swap/v2/trade/leverage?{query_string}&signature={signature}"
+        
+        try:
+            response = requests.post(url, headers=headers)
+            return response.json()
+        except Exception as e:
+            return {"error": str(e)}
+
+
+def set_margin_type(symbol, margin_type):
+    """証拠金モードを設定"""
+    timestamp = str(int(time.time() * 1000))
+    
+    params = {
+        "symbol": symbol,
+        "marginType": margin_type,
+        "timestamp": timestamp
+    }
+    
+    query_string = "&".join([f"{k}={params[k]}" for k in sorted(params.keys())])
+    signature = generate_signature(query_string, SECRET_KEY)
+    
+    headers = {"X-BX-APIKEY": API_KEY}
+    url = f"{BASE_URL}/openApi/swap/v2/trade/marginType?{query_string}&signature={signature}"
+    
+    try:
+        response = requests.post(url, headers=headers)
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def calculate_trigger_prices(current_price):
+    """トリガー価格を計算"""
+    if USE_RATIO_MODE:
+        trigger_long = current_price * (1 + TRIGGER_RATIO_LONG)
+        trigger_short = current_price * (1 + TRIGGER_RATIO_SHORT)
+    else:
+        trigger_long = current_price + TRIGGER_OFFSET_LONG
+        trigger_short = current_price + TRIGGER_OFFSET_SHORT
+    
+    return {
+        'trigger_long': round(trigger_long, PRICE_DECIMALS),
+        'trigger_short': round(trigger_short, PRICE_DECIMALS)
+    }
+
+def place_order(symbol, side, position_side, order_type, quantity, stop_price=None):
+    """注文を発注（統一関数）"""
+    timestamp = str(int(time.time() * 1000))
     
     params = {
         "symbol": symbol,
         "side": side,
-        "type": "TRIGGER_MARKET",
-        "quantity": quantity,
-        "stopPrice": stop_price,
-        "workingType": price_type,
+        "positionSide": position_side,
+        "type": order_type,
+        "quantity": str(quantity),
+        "workingType": PRICE_TYPE,
         "timestamp": timestamp
     }
     
-    signature = generate_signature(params, SECRET_KEY)
-    params["signature"] = signature
+    if stop_price:
+        params["stopPrice"] = str(stop_price)
     
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
+    query_string = "&".join([f"{k}={params[k]}" for k in sorted(params.keys())])
+    signature = generate_signature(query_string, SECRET_KEY)
     
-    url = f"{BASE_URL}/openApi/swap/v2/trade/order"
-    
-    try:
-        response = requests.post(url, params=params, headers=headers)
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-def place_stop_loss_order(symbol, side, quantity, stop_price, price_type="LAST_PRICE"):
-    """損切り注文を発注（STOP_MARKET）"""
-    timestamp = int(time.time() * 1000)
-    
-    # ロングポジションの損切りはSELL、ショートポジションの損切りはBUY
-    stop_side = "SELL" if side == "BUY" else "BUY"
-    
-    params = {
-        "symbol": symbol,
-        "side": stop_side,
-        "type": "STOP_MARKET",
-        "quantity": quantity,
-        "stopPrice": stop_price,
-        "workingType": price_type,
-        "timestamp": timestamp
-    }
-    
-    signature = generate_signature(params, SECRET_KEY)
-    params["signature"] = signature
-    
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    
-    url = f"{BASE_URL}/openApi/swap/v2/trade/order"
+    headers = {"X-BX-APIKEY": API_KEY}
+    url = f"{BASE_URL}/openApi/swap/v2/trade/order?{query_string}&signature={signature}"
     
     try:
-        response = requests.post(url, params=params, headers=headers)
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-def place_take_profit_order(symbol, side, quantity, tp_price, price_type="LAST_PRICE"):
-    """利確注文を発注（TAKE_PROFIT_MARKET）"""
-    timestamp = int(time.time() * 1000)
-    
-    # ロングポジションの利確はSELL、ショートポジションの利確はBUY
-    tp_side = "SELL" if side == "BUY" else "BUY"
-    
-    params = {
-        "symbol": symbol,
-        "side": tp_side,
-        "type": "TAKE_PROFIT_MARKET",
-        "quantity": quantity,
-        "stopPrice": tp_price,
-        "workingType": price_type,
-        "timestamp": timestamp
-    }
-    
-    signature = generate_signature(params, SECRET_KEY)
-    params["signature"] = signature
-    
-    headers = {
-        "X-BX-APIKEY": API_KEY
-    }
-    
-    url = f"{BASE_URL}/openApi/swap/v2/trade/order"
-    
-    try:
-        response = requests.post(url, params=params, headers=headers)
+        response = requests.post(url, headers=headers)
         return response.json()
     except Exception as e:
         return {"error": str(e)}
@@ -323,9 +304,6 @@ def execute_trading_strategy():
     print("\n" + "=" * 60)
     print("レバレッジ設定")
     print("=" * 60)
-    print(f"  レバレッジ: {LEVERAGE}x")
-    print(f"  方向: {LEVERAGE_SIDE}")
-    
     leverage_result = set_leverage(SYMBOL, LEVERAGE_SIDE, LEVERAGE)
     print(f"  結果: {leverage_result}")
     
@@ -333,32 +311,26 @@ def execute_trading_strategy():
     print("\n" + "=" * 60)
     print("証拠金モード設定")
     print("=" * 60)
-    print(f"  証拠金モード: {MARGIN_TYPE}")
-    
     margin_result = set_margin_type(SYMBOL, MARGIN_TYPE)
     print(f"  結果: {margin_result}")
     
-    # 各注文価格を計算
-    prices = calculate_prices(current_price)
+    # トリガー価格を計算
+    trigger_prices = calculate_trigger_prices(current_price)
+    
+    # 損切り価格を計算（Noneの場合もある）
+    stop_loss_prices = calculate_stop_loss_prices(current_price, order_quantity)
     
     print("\n" + "=" * 60)
     print("計算された注文価格")
     print("=" * 60)
-    if USE_RATIO_MODE:
-        print(f"  ロング トリガー: {prices['trigger_long']} (現在価格 × {1 + TRIGGER_RATIO_LONG:.6f})")
-        print(f"  ショート トリガー: {prices['trigger_short']} (現在価格 × {1 + TRIGGER_RATIO_SHORT:.6f})")
-        print(f"  ロング 損切り: {prices['sl_long']} (現在価格 × {1 + STOP_LOSS_RATIO_LONG:.6f})")
-        print(f"  ショート 損切り: {prices['sl_short']} (現在価格 × {1 + STOP_LOSS_RATIO_SHORT:.6f})")
-    else:
-        print(f"  ロング トリガー: {prices['trigger_long']} (現在価格 + {TRIGGER_OFFSET_LONG})")
-        print(f"  ショート トリガー: {prices['trigger_short']} (現在価格 + {TRIGGER_OFFSET_SHORT})")
-        print(f"  ロング 損切り: {prices['sl_long']} (現在価格 + {STOP_LOSS_OFFSET_LONG})")
-        print(f"  ショート 損切り: {prices['sl_short']} (現在価格 + {STOP_LOSS_OFFSET_SHORT})")
+    print(f"  ロング トリガー: {trigger_prices['trigger_long']}")
+    print(f"  ショート トリガー: {trigger_prices['trigger_short']}")
     
-    if prices['tp_long']:
-        print(f"  ロング 利確: {prices['tp_long']}")
-    if prices['tp_short']:
-        print(f"  ショート 利確: {prices['tp_short']}")
+    if stop_loss_prices:
+        print(f"  ロング 損切り: {stop_loss_prices['sl_long']}")
+        print(f"  ショート 損切り: {stop_loss_prices['sl_short']}")
+    else:
+        print(f"  損切り: 設定なし")
     
     print("\n" + "=" * 60)
     print("トリガー注文設定")
@@ -366,92 +338,45 @@ def execute_trading_strategy():
     
     # ロングトリガー注文
     print(f"\n【ロング注文】")
-    print(f"  トリガー価格: {prices['trigger_long']}")
-    print(f"  数量: {order_quantity}")
-    long_order = place_trigger_order(
-        symbol=SYMBOL,
-        side="BUY",
-        quantity=order_quantity,
-        stop_price=prices['trigger_long'],
-        price_type=PRICE_TYPE
-    )
-    print(f"  結果: {long_order}")
+    long_order = place_order(SYMBOL, "BUY", "LONG", "TRIGGER_MARKET", order_quantity, trigger_prices['trigger_long'])
+    if long_order.get('code') == 0:
+        print(f"  ✅ 成功 ID: {long_order['data']['order']['orderId']}")
+    else:
+        print(f"  ❌ 失敗: {long_order}")
     
     # ショートトリガー注文
     print(f"\n【ショート注文】")
-    print(f"  トリガー価格: {prices['trigger_short']}")
-    print(f"  数量: {order_quantity}")
-    short_order = place_trigger_order(
-        symbol=SYMBOL,
-        side="SELL",
-        quantity=order_quantity,
-        stop_price=prices['trigger_short'],
-        price_type=PRICE_TYPE
-    )
-    print(f"  結果: {short_order}")
+    short_order = place_order(SYMBOL, "SELL", "SHORT", "TRIGGER_MARKET", order_quantity, trigger_prices['trigger_short'])
+    if short_order.get('code') == 0:
+        print(f"  ✅ 成功 ID: {short_order['data']['order']['orderId']}")
+    else:
+        print(f"  ❌ 失敗: {short_order}")
     
-    # 損切り設定
-    print("\n" + "=" * 60)
-    print("損切り注文設定")
-    print("=" * 60)
-    
-    # ロングの損切り
-    print(f"\n【ロングポジション損切り】")
-    print(f"  損切り価格: {prices['sl_long']}")
-    print(f"  数量: {order_quantity}")
-    long_sl = place_stop_loss_order(
-        symbol=SYMBOL,
-        side="BUY",
-        quantity=order_quantity,
-        stop_price=prices['sl_long'],
-        price_type=PRICE_TYPE
-    )
-    print(f"  結果: {long_sl}")
-    
-    # ショートの損切り
-    print(f"\n【ショートポジション損切り】")
-    print(f"  損切り価格: {prices['sl_short']}")
-    print(f"  数量: {order_quantity}")
-    short_sl = place_stop_loss_order(
-        symbol=SYMBOL,
-        side="SELL",
-        quantity=order_quantity,
-        stop_price=prices['sl_short'],
-        price_type=PRICE_TYPE
-    )
-    print(f"  結果: {short_sl}")
-    
-    # 利確設定（オプション）
-    if prices['tp_long'] or prices['tp_short']:
+    # 損切り設定（STOP_LOSS_MODE == "NONE"の場合はスキップ）
+    if stop_loss_prices:
         print("\n" + "=" * 60)
-        print("利確注文設定")
+        print("損切り注文設定")
         print("=" * 60)
         
-        if prices['tp_long']:
-            print(f"\n【ロングポジション利確】")
-            print(f"  利確価格: {prices['tp_long']}")
-            print(f"  数量: {order_quantity}")
-            long_tp = place_take_profit_order(
-                symbol=SYMBOL,
-                side="BUY",
-                quantity=order_quantity,
-                tp_price=prices['tp_long'],
-                price_type=PRICE_TYPE
-            )
-            print(f"  結果: {long_tp}")
+        # ロングの損切り
+        print(f"\n【ロング損切り】")
+        long_sl = place_order(SYMBOL, "SELL", "LONG", "STOP_MARKET", order_quantity, stop_loss_prices['sl_long'])
+        if long_sl.get('code') == 0:
+            print(f"  ✅ 成功 ID: {long_sl['data']['order']['orderId']}")
+        else:
+            print(f"  ❌ 失敗: {long_sl}")
         
-        if prices['tp_short']:
-            print(f"\n【ショートポジション利確】")
-            print(f"  利確価格: {prices['tp_short']}")
-            print(f"  数量: {order_quantity}")
-            short_tp = place_take_profit_order(
-                symbol=SYMBOL,
-                side="SELL",
-                quantity=order_quantity,
-                tp_price=prices['tp_short'],
-                price_type=PRICE_TYPE
-            )
-            print(f"  結果: {short_tp}")
+        # ショートの損切り
+        print(f"\n【ショート損切り】")
+        short_sl = place_order(SYMBOL, "BUY", "SHORT", "STOP_MARKET", order_quantity, stop_loss_prices['sl_short'])
+        if short_sl.get('code') == 0:
+            print(f"  ✅ 成功 ID: {short_sl['data']['order']['orderId']}")
+        else:
+            print(f"  ❌ 失敗: {short_sl}")
+    else:
+        print("\n" + "=" * 60)
+        print("損切り注文: スキップ（設定なし）")
+        print("=" * 60)
     
     print("\n" + "=" * 60)
     print("全ての注文処理が完了しました")
@@ -461,7 +386,8 @@ def schedule_execution():
     """スケジュール実行"""
     schedule.every().day.at(SCHEDULE_TIME).do(execute_trading_strategy)
     
-    print(f"スケジューラ起動中: 毎日 {SCHEDULE_TIME} に実行")
+    print(f"\nスケジューラ起動中: 毎日 {SCHEDULE_TIME} に実行")
+    print(f"次回実行予定: {schedule.next_run()}")
     print("停止する場合は Ctrl+C を押してください\n")
     
     while True:
@@ -474,7 +400,7 @@ def schedule_execution():
 
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    print("BingX XAU 自動トリガー注文＋損切りシステム")
+    print("BingX XAUT 自動トリガー注文＋損切りシステム")
     print("=" * 60)
     print(f"\n【設定内容】")
     print(f"  通貨ペア: {SYMBOL}")
@@ -490,31 +416,28 @@ if __name__ == "__main__":
     print(f"  レバレッジ: {LEVERAGE}x ({LEVERAGE_SIDE})")
     print(f"  証拠金モード: {MARGIN_TYPE}")
     
-    if USE_RATIO_MODE:
-        print(f"\n  【比率モード】")
-        print(f"  ロング トリガー: 現在価格 × {1 + TRIGGER_RATIO_LONG:.6f} ({TRIGGER_RATIO_LONG*100:.4f}%)")
-        print(f"  ショート トリガー: 現在価格 × {1 + TRIGGER_RATIO_SHORT:.6f} ({TRIGGER_RATIO_SHORT*100:.4f}%)")
-        print(f"  ロング 損切り: 現在価格 × {1 + STOP_LOSS_RATIO_LONG:.6f} ({STOP_LOSS_RATIO_LONG*100:.4f}%)")
-        print(f"  ショート 損切り: 現在価格 × {1 + STOP_LOSS_RATIO_SHORT:.6f} ({STOP_LOSS_RATIO_SHORT*100:.4f}%)")
-    else:
-        print(f"\n  【固定幅モード】")
-        print(f"  ロング トリガー: 現在価格 + {TRIGGER_OFFSET_LONG}ドル")
-        print(f"  ショート トリガー: 現在価格 + {TRIGGER_OFFSET_SHORT}ドル")
-        print(f"  ロング 損切り: 現在価格 + {STOP_LOSS_OFFSET_LONG}ドル")
-        print(f"  ショート 損切り: 現在価格 + {STOP_LOSS_OFFSET_SHORT}ドル")
+    print(f"\n  【トリガー設定】")
+    print(f"  ロング: 現在価格 + {TRIGGER_OFFSET_LONG}ドル")
+    print(f"  ショート: 現在価格 + {TRIGGER_OFFSET_SHORT}ドル")
     
-    if TAKE_PROFIT_OFFSET_LONG:
-        print(f"  ロング 利確幅: {TAKE_PROFIT_OFFSET_LONG}ドル")
-    if TAKE_PROFIT_OFFSET_SHORT:
-        print(f"  ショート 利確幅: {TAKE_PROFIT_OFFSET_SHORT}ドル")
+    print(f"\n  【損切り設定モード: {STOP_LOSS_MODE}】")
+    if STOP_LOSS_MODE == "NONE":
+        print(f"  損切り設定なし")
+    elif STOP_LOSS_MODE == "FIXED_OFFSET":
+        print(f"  ロング: {STOP_LOSS_OFFSET_LONG:+.1f}ドル")
+        print(f"  ショート: {STOP_LOSS_OFFSET_SHORT:+.1f}ドル")
+    elif STOP_LOSS_MODE == "PERCENTAGE":
+        print(f"  ロング: {STOP_LOSS_PERCENTAGE_LONG:+.2f}%")
+        print(f"  ショート: {STOP_LOSS_PERCENTAGE_SHORT:+.2f}%")
+    elif STOP_LOSS_MODE == "LOSS_AMOUNT":
+        print(f"  ロング最大損失: ${MAX_LOSS_AMOUNT_LONG}")
+        print(f"  ショート最大損失: ${MAX_LOSS_AMOUNT_SHORT}")
     
     print(f"\n  価格タイプ: {PRICE_TYPE}")
     print(f"  実行時刻: {SCHEDULE_TIME if USE_SCHEDULE else '即時実行'}")
     print()
     
     if USE_SCHEDULE:
-        # スケジュール実行
         schedule_execution()
     else:
-        # 即時実行
         execute_trading_strategy()
