@@ -7,7 +7,7 @@
     100,
     125
   ],
-  "tactic": "スキャ",
+  "tactic": "ホールド",
   "exchanges": {
     "BingX": true,
     "MEXC": true,

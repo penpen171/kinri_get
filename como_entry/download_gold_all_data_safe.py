@@ -1,5 +1,6 @@
 # download_gold_all_data_safe.py
-# API負荷を最小限にした安全版
+# 指定した期間の1分足を取得する
+# API負荷を最小限にした安全版（期間指定改良版）
 
 import requests
 import time
@@ -12,8 +13,13 @@ JST = timezone(timedelta(hours=9))
 
 # 設定
 SYMBOL = "NCCOGOLD2USD-USDT"
-START_DATE = "2026-01-01"
-OUTPUT_FILE = "gold_1min_full_data.csv"
+START_DATE = "2025-11-01"  # 開始日（必須）
+END_DATE = "2026-02-09"  # 終了日（任意、Noneの場合は開始日から最大2ヶ月後まで）
+OUTPUT_FILE = None  # Noneの場合は自動生成（例: gold_1min_20260201_20260401.csv）
+
+#シンボルリスト
+# NCCOGOLD2USD-USDT
+#
 
 # API制限対策の設定
 REQUEST_INTERVAL = 0.3  # リクエスト間隔を0.3秒に（より安全）
@@ -80,17 +86,32 @@ def get_klines_v2_safe(symbol, start_time, end_time, retry_count=0):
         return []
 
 
-def download_all_data_safe(symbol, start_date_str, output_file):
-    """全期間のデータをダウンロード（安全版）"""
+def download_all_data_safe(symbol, start_date_str, end_date_str=None, output_file=None):
+    """全期間のデータをダウンロード（安全版・期間指定対応）"""
     
     print("=" * 80)
     print(f"📥 {symbol} 全データダウンロード（API負荷最小化版）")
     print("=" * 80)
     
+    # 開始日の設定
     start_date = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=JST, hour=0, minute=0)
-    end_date = datetime.now(JST)
     
-    total_days = (end_date - start_date).days
+    # 終了日の設定
+    if end_date_str:
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").replace(tzinfo=JST, hour=23, minute=59)
+    else:
+        # 終了日未指定の場合、開始日から2ヶ月後または現在日時の早い方
+        max_end = start_date + timedelta(days=60)  # 2ヶ月 = 約60日
+        now = datetime.now(JST)
+        end_date = min(max_end, now)
+    
+    # 出力ファイル名の自動生成
+    if output_file is None:
+        start_str = start_date.strftime('%Y%m%d')
+        end_str = end_date.strftime('%Y%m%d')
+        output_file = f"gold_1min_{start_str}_{end_str}.csv"
+    
+    total_days = (end_date - start_date).days + 1
     estimated_time = total_days * REQUEST_INTERVAL
     
     print(f"\n期間:")
@@ -110,7 +131,7 @@ def download_all_data_safe(symbol, start_date_str, output_file):
     request_count = 0
     start_time_total = time.time()
     
-    while current_date < end_date:
+    while current_date <= end_date:
         day_start = current_date
         day_end = current_date + timedelta(days=1)
         
@@ -124,7 +145,7 @@ def download_all_data_safe(symbol, start_date_str, output_file):
         if candles:
             all_candles.extend(candles)
             elapsed = time.time() - start_time_total
-            remaining_days = (end_date - current_date).days
+            remaining_days = max(0, (end_date - current_date).days)
             eta = remaining_days * REQUEST_INTERVAL
             
             print(f"  {current_date.strftime('%Y-%m-%d')}: {len(candles):4d}本 | "
@@ -206,4 +227,4 @@ def download_all_data_safe(symbol, start_date_str, output_file):
 
 
 if __name__ == "__main__":
-    download_all_data_safe(SYMBOL, START_DATE, OUTPUT_FILE)
+    download_all_data_safe(SYMBOL, START_DATE, END_DATE, OUTPUT_FILE)
