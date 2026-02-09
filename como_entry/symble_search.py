@@ -14,7 +14,7 @@ def find_gold_symbol():
             print(f"Total symbols found: {len(all_symbols)}")
             
             # 'XAU' または 'GOLD' を含むシンボルを検索
-            gold_symbols = [s for s in all_symbols if "XAU" in s['symbol'] or "GOLD" in s['symbol']]
+            gold_symbols = [s for s in all_symbols if "OIL" in s['symbol'] or "WTI" in s['symbol']]
             
             if gold_symbols:
                 print("\n=== Found Gold Symbols ===")
