@@ -13,8 +13,8 @@ JST = timezone(timedelta(hours=9))
 
 # 設定
 SYMBOL = "NCCOGOLD2USD-USDT"
-START_DATE = "2025-11-01"  # 開始日（必須）
-END_DATE = "2026-02-09"  # 終了日（任意、Noneの場合は開始日から最大2ヶ月後まで）
+START_DATE = "2026-02-09"  # 開始日（必須）
+END_DATE = "2026-02-10"  # 終了日（任意、Noneの場合は開始日から最大2ヶ月後まで）
 OUTPUT_FILE = None  # Noneの場合は自動生成（例: gold_1min_20260201_20260401.csv）
 
 #シンボルリスト

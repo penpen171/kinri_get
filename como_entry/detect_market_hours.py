@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import os
 
 # 設定
-INPUT_FILE = "gold_1min_20251101_20260209.csv"  # 入力CSVファイル
+INPUT_FILE = "gold_1min_20251101_.csv"  # 入力CSVファイル
 START_DATE = None  # 開始日（例: "2026-02-01"）Noneの場合は全期間
 END_DATE = None    # 終了日（例: "2026-02-07"）Noneの場合は全期間
 OUTPUT_FILE = None  # Noneの場合は自動生成

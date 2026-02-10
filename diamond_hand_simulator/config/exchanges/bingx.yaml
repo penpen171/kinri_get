@@ -1,0 +1,38 @@
+# BingX取引所の設定（分離マージン）
+# NCCOGOLD2USD-USDT 無期限先物
+
+# Adjustment Factor（調整係数）
+# BingXの強制清算ルールで使用される係数
+# 損失がこの割合に達すると強制清算
+adjustment_factor: 0.10
+
+# 清算手数料率（将来の精度向上用）
+liquidation_fee_rate: 0.0005
+
+# 維持証拠金率ティア（将来の精度向上用）
+# ポジションサイズに応じて維持証拠金率が変わる
+maintenance_margin_tiers:
+  - notional_max: 50000        # USD
+    maintenance_rate: 0.005    # 0.5%
+    maintenance_amount: 0
+
+  - notional_max: 250000       # USD
+    maintenance_rate: 0.010    # 1.0%
+    maintenance_amount: 250
+
+  - notional_max: 1000000      # USD
+    maintenance_rate: 0.015    # 1.5%
+    maintenance_amount: 1500
+
+  - notional_max: 5000000      # USD
+    maintenance_rate: 0.025    # 2.5%
+    maintenance_amount: 11500
+
+  - notional_max: 10000000     # USD
+    maintenance_rate: 0.050    # 5.0%
+    maintenance_amount: 136500
+
+# 備考
+# - adjustment_factor は公式ドキュメントの例示値（0.10 = 10%）を使用
+# - 実際の清算価格は資金調達率や未実現損益によって変動する可能性あり
+# - v1では簡易計算、v2以降で維持証拠金ティアを考慮
