@@ -99,8 +99,9 @@ def load_data():
 @st.cache_data
 def load_1min_data():
     """1分足データを読み込み"""
+    path = APP_DIR / "data"/"raw"/"gold_1min_20251101_.csv"
     df = pd.read_csv(
-        'data/raw/gold_1min_20251101_.csv',
+        path,
         parse_dates=['日時']
     )
     df = df.rename(columns={
