@@ -10,7 +10,7 @@
   "tactic": "ホールド",
   "exchanges": {
     "BingX": true,
-    "MEXC": true,
+    "MEXC": false,
     "Bitget": true,
     "Variational": true
   }
