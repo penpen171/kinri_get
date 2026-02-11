@@ -5,8 +5,8 @@ from datetime import datetime
 from core.logic import judge_all, calculate_statistics, DEFAULT_THRESHOLD_MIN, DEFAULT_JUDGMENT_HOURS
 from core.liquidation.simple_af import SimpleAFModel
 from pathlib import Path
-APP_DIR = Path(__file__).resolve().parent
 
+APP_DIR = Path(__file__).resolve().parent
 
 st.set_page_config(page_title="ゴールド戦略シミュレータ", page_icon="💎", layout="wide")
 
@@ -88,14 +88,7 @@ judgment_period_label = st.sidebar.selectbox(
 
 judgment_hours = judgment_options[judgment_period_label]
 
-
-import streamlit as st
-import logging
-
-# ログ設定
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+# データ読み込み
 @st.cache_data
 def load_data(limit_rows=None):
     """日次集計データを読み込み"""
@@ -109,31 +102,10 @@ def load_data(limit_rows=None):
     
     return df
 
-# 呼び出し
-df = load_data(limit_rows=100)  # 最初は100日でテスト
-
-'''
-def load_data():
-    logger.info("parquetファイル読み込み開始")
-    path = APP_DIR / "data" / "derived" / "daily_aggregates.parquet"
-    df = pd.read_parquet(path)
-    logger.info(f"読み込み完了: {len(df)} 行")
-    return df
-'''
-
-
-# データ読み込み
-@st.cache_data
-def load_data():
-    path = APP_DIR / "data" / "derived" / "daily_aggregates.parquet"
-    return pd.read_parquet(path)
-
-
-# ↓ここに追加
 @st.cache_data
 def load_1min_data():
     """1分足データを読み込み"""
-    path = APP_DIR / "data"/"raw"/"gold_1min_20251101_.csv"
+    path = APP_DIR / "data" / "raw" / "gold_1min_20251101_.csv"
     df = pd.read_csv(
         path,
         parse_dates=['日時']
@@ -152,12 +124,11 @@ def load_1min_data():
 def load_model():
     return SimpleAFModel()
 
-
+# メイン処理
 try:
-    df = load_data()
-    df_1min = load_1min_data()  # ← この行を追加
+    df = load_data(limit_rows=100)  # 最初は100日でテスト
+    df_1min = load_1min_data()
     model = load_model()
-
     
     # ロスカット目安を表示
     st.sidebar.markdown("---")
@@ -190,29 +161,28 @@ try:
         )
         st.caption(f"${entry_sample:,.0f} → ${liq_price_with_add:,.0f}")
     
-        # 判定実行
-        st.write("🔵 ステップ4: 判定処理開始")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        with st.spinner(f'判定中...（{len(df)}件のデータ）'):
-            results = judge_all(
-                df,
-                model,
-                leverage,
-                position_margin,
-                additional_margin,
-                threshold_min=DEFAULT_THRESHOLD_MIN,
-                judgment_hours=judgment_hours,
-                df_1min=df_1min
-            )
-            
-        progress_bar.progress(100)
-        status_text.text("✅ 判定完了！")
-        st.write("✅ ステップ5: 処理完了")
-
-
-        stats = calculate_statistics(results)
+    # 判定実行
+    st.write("🔵 ステップ4: 判定処理開始")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    with st.spinner(f'判定中...（{len(df)}件のデータ）'):
+        results = judge_all(
+            df,
+            model,
+            leverage,
+            position_margin,
+            additional_margin,
+            threshold_min=DEFAULT_THRESHOLD_MIN,
+            judgment_hours=judgment_hours,
+            df_1min=df_1min
+        )
+    
+    progress_bar.progress(100)
+    status_text.text("✅ 判定完了！")
+    st.write("✅ ステップ5: 処理完了")
+    
+    stats = calculate_statistics(results)
     
     # 統計情報を表示
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -312,7 +282,7 @@ try:
         else:
             display_df = results_df[['date', 'type', 'symbol', 'detail', 'judgment_label']].copy()
             display_df.columns = ['日付', 'タイプ', '判定', '詳細', '判定期間']
-            st.dataframe(display_df, use_container_width=True, height=600)
+            st.dataframe(display_df, width=None, height=600)
     
     with tab3:
         st.subheader("統計情報")
@@ -322,7 +292,7 @@ try:
             {'絵文字': k, 'カウント': v, '割合': f"{v/stats['total']*100:.1f}%"}
             for k, v in sorted(stats['symbol_counts'].items(), key=lambda x: -x[1])
         ])
-        st.dataframe(symbol_df, use_container_width=True)
+        st.dataframe(symbol_df, width=None)
         
         st.markdown("#### パラメータ")
         param_df = pd.DataFrame([
@@ -334,7 +304,7 @@ try:
             {'項目': '判定期間', '値': judgment_period_label},
             {'項目': 'Adjustment Factor', '値': f"{model.adjustment_factor * 100}%"},
         ])
-        st.dataframe(param_df, use_container_width=True)
+        st.dataframe(param_df, width=None)
 
 except FileNotFoundError:
     st.error("データファイルが見つかりません。先に build_daily_aggregates.py を実行してください。")

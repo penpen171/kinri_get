@@ -204,10 +204,12 @@ def judge_all(df_aggregates, liq_model, leverage, position_margin, additional_ma
         if result is not None:
             results.append(result)
         
+        # ⬇️ これを追加
         # 進捗報告（10%ごと）
         if progress_callback and (i % max(1, total // 10) == 0):
             progress_callback(i, total)
     
+    # ⬇️ これを追加
     return results
 
 
