@@ -4,6 +4,9 @@ import calendar
 from datetime import datetime
 from core.logic import judge_all, calculate_statistics, DEFAULT_THRESHOLD_MIN, DEFAULT_JUDGMENT_HOURS
 from core.liquidation.simple_af import SimpleAFModel
+from pathlib import Path
+APP_DIR = Path(__file__).resolve().parent
+
 
 st.set_page_config(page_title="ゴールド戦略シミュレータ", page_icon="💎", layout="wide")
 
@@ -88,7 +91,9 @@ judgment_hours = judgment_options[judgment_period_label]
 # データ読み込み
 @st.cache_data
 def load_data():
-    return pd.read_parquet('data/derived/daily_aggregates.parquet')
+    path = APP_DIR / "data" / "derived" / "daily_aggregates.parquet"
+    return pd.read_parquet(path)
+
 
 # ↓ここに追加
 @st.cache_data
