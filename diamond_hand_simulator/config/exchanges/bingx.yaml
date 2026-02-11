@@ -4,7 +4,7 @@
 # Adjustment Factor（調整係数）
 # BingXの強制清算ルールで使用される係数
 # 損失がこの割合に達すると強制清算
-adjustment_factor: 0.10
+adjustment_factor: 0.999
 
 # 清算手数料率（将来の精度向上用）
 liquidation_fee_rate: 0.0005

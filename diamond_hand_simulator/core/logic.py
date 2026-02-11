@@ -6,7 +6,7 @@ import pandas as pd
 from core.liquidation.simple_af import SimpleAFModel
 
 # === 設定（ここを変更すれば判定ロジックを調整可能） ===
-DEFAULT_THRESHOLD_MIN = 1  # デフォルトの閾値（分）
+DEFAULT_THRESHOLD_MIN = 2  # デフォルトの閾値（分）
 DEFAULT_JUDGMENT_HOURS = None  # デフォルトの判定時間（None = 次の閉場まで）
 
 
