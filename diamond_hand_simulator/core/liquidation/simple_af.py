@@ -22,8 +22,9 @@ class SimpleAFModel:
         """
         if config_path is None:
             # このファイル（simple_af.py）があるフォルダを基準
-            script_dir = Path(__file__).resolve().parent.parent
+            script_dir = Path(__file__).resolve().parent.parent.parent  # 3回parent
             config_path = script_dir / "config" / "exchanges" / "bingx.yaml"
+
         
         self.config = self._load_config(config_path)
         self.adjustment_factor = self.config.get('adjustment_factor', 0.10)

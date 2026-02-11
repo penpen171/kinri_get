@@ -126,7 +126,7 @@ def load_model():
 
 # メイン処理
 try:
-    df = load_data(limit_rows=100)  # 最初は100日でテスト
+    df = load_data(limit_rows=100)  # テスト版：100日のみ
     df_1min = load_1min_data()
     model = load_model()
     
@@ -282,7 +282,7 @@ try:
         else:
             display_df = results_df[['date', 'type', 'symbol', 'detail', 'judgment_label']].copy()
             display_df.columns = ['日付', 'タイプ', '判定', '詳細', '判定期間']
-            st.dataframe(display_df, width=None, height=600)
+            st.dataframe(display_df, use_container_width=True, height=600)
     
     with tab3:
         st.subheader("統計情報")
@@ -292,7 +292,7 @@ try:
             {'絵文字': k, 'カウント': v, '割合': f"{v/stats['total']*100:.1f}%"}
             for k, v in sorted(stats['symbol_counts'].items(), key=lambda x: -x[1])
         ])
-        st.dataframe(symbol_df, width=None)
+        st.dataframe(symbol_df, use_container_width=True)
         
         st.markdown("#### パラメータ")
         param_df = pd.DataFrame([
@@ -304,7 +304,7 @@ try:
             {'項目': '判定期間', '値': judgment_period_label},
             {'項目': 'Adjustment Factor', '値': f"{model.adjustment_factor * 100}%"},
         ])
-        st.dataframe(param_df, width=None)
+        st.dataframe(param_df, use_container_width=True)
 
 except FileNotFoundError:
     st.error("データファイルが見つかりません。先に build_daily_aggregates.py を実行してください。")
