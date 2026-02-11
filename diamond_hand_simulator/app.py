@@ -88,6 +88,24 @@ judgment_period_label = st.sidebar.selectbox(
 
 judgment_hours = judgment_options[judgment_period_label]
 
+
+import streamlit as st
+import logging
+
+# ログ設定
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@st.cache_data
+def load_data():
+    logger.info("parquetファイル読み込み開始")
+    path = APP_DIR / "data" / "derived" / "daily_aggregates.parquet"
+    df = pd.read_parquet(path)
+    logger.info(f"読み込み完了: {len(df)} 行")
+    return df
+
+
+
 # データ読み込み
 @st.cache_data
 def load_data():
@@ -156,18 +174,27 @@ try:
         )
         st.caption(f"${entry_sample:,.0f} → ${liq_price_with_add:,.0f}")
     
-    # 判定実行
-    with st.spinner('判定中...'):
-        results = judge_all(
-            df,
-            model,
-            leverage,
-            position_margin,
-            additional_margin,
-            threshold_min=DEFAULT_THRESHOLD_MIN,
-            judgment_hours=judgment_hours,
-            df_1min=df_1min  # ← この行を追加
-        )
+        # 判定実行
+        st.write("🔵 ステップ4: 判定処理開始")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        with st.spinner(f'判定中...（{len(df)}件のデータ）'):
+            results = judge_all(
+                df,
+                model,
+                leverage,
+                position_margin,
+                additional_margin,
+                threshold_min=DEFAULT_THRESHOLD_MIN,
+                judgment_hours=judgment_hours,
+                df_1min=df_1min
+            )
+            
+        progress_bar.progress(100)
+        status_text.text("✅ 判定完了！")
+        st.write("✅ ステップ5: 処理完了")
+
 
         stats = calculate_statistics(results)
     
