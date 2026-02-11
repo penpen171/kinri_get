@@ -188,19 +188,25 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0,
         }
 
 
-def judge_all(df_aggregates, liq_model, leverage, position_margin, additional_margin=0, 
+def judge_all(df_aggregates, liq_model, leverage, position_margin, additional_margin=0,
               threshold_min=DEFAULT_THRESHOLD_MIN, judgment_hours=DEFAULT_JUDGMENT_HOURS,
-              df_1min=None):
+              df_1min=None, progress_callback=None):
     """
     全日のデータを判定
+    progress_callback: 進捗を報告するコールバック関数（オプション）
     """
     results = []
+    total = len(df_aggregates)
     
-    for idx, row in df_aggregates.iterrows():
-        result = judge_day(row, liq_model, leverage, position_margin, additional_margin, 
+    for i, (idx, row) in enumerate(df_aggregates.iterrows()):
+        result = judge_day(row, liq_model, leverage, position_margin, additional_margin,
                           threshold_min, judgment_hours, df_1min)
         if result is not None:
             results.append(result)
+        
+        # 進捗報告（10%ごと）
+        if progress_callback and (i % max(1, total // 10) == 0):
+            progress_callback(i, total)
     
     return results
 

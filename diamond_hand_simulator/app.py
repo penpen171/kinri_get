@@ -97,13 +97,29 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @st.cache_data
+def load_data(limit_rows=None):
+    """日次集計データを読み込み"""
+    path = APP_DIR / "data" / "derived" / "daily_aggregates.parquet"
+    df = pd.read_parquet(path)
+    
+    # テスト用：最新N行に制限
+    if limit_rows is not None:
+        df = df.tail(limit_rows)
+        st.warning(f"⚠️ テスト版：最新{limit_rows}日のみ表示")
+    
+    return df
+
+# 呼び出し
+df = load_data(limit_rows=100)  # 最初は100日でテスト
+
+'''
 def load_data():
     logger.info("parquetファイル読み込み開始")
     path = APP_DIR / "data" / "derived" / "daily_aggregates.parquet"
     df = pd.read_parquet(path)
     logger.info(f"読み込み完了: {len(df)} 行")
     return df
-
+'''
 
 
 # データ読み込み
