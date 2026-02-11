@@ -15,15 +15,21 @@ class SimpleAFModel:
     - ロスカット価格 = 建値 ± (建値 × (総証拠金/必要証拠金) × (1 - AF) / レバレッジ)
     """
     
-    def __init__(self, config_path='config/exchanges/bingx.yaml'):
+    def __init__(self, config_path=None):
         """
         Args:
-            config_path: 設定ファイルのパス
+            config_path: 設定ファイルのパス（Noneの場合はデフォルトパス）
         """
+        if config_path is None:
+            # このファイル（simple_af.py）があるフォルダを基準
+            script_dir = Path(__file__).resolve().parent.parent
+            config_path = script_dir / "config" / "exchanges" / "bingx.yaml"
+        
         self.config = self._load_config(config_path)
         self.adjustment_factor = self.config.get('adjustment_factor', 0.10)
         self.liquidation_fee_rate = self.config.get('liquidation_fee_rate', 0.0005)
-    
+        
+        
     def _load_config(self, config_path):
         """設定ファイルを読み込む"""
         path = Path(config_path)

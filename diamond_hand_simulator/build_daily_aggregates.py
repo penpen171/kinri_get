@@ -168,14 +168,19 @@ def process_daily_data(df_1min, df_market, threshold_minutes=[1],
 
 
 def main():
+    # このスクリプトがあるフォルダ（diamond_hand_simulator）を基準
+    SCRIPT_DIR = Path(__file__).resolve().parent
+    
     print("=" * 60)
     print("日次集計データの作成（複数時間窓対応版）")
     print("=" * 60)
     
     # データ読み込み
     print("\n[1/4] データ読み込み中...")
+    # 修正：絶対パスに
+    market_csv_path = SCRIPT_DIR / "data" / "raw" / "market_hours_20251101_.csv"
     df_market = pd.read_csv(
-        'data/raw/market_hours_20251101_.csv',
+        market_csv_path,
         parse_dates=['閉場日時', '開場日時']
     )
     
@@ -190,8 +195,9 @@ def main():
     
     print(f"  市場休場データ: {len(df_market)}行")
     
+    gold_csv_path = SCRIPT_DIR / "data" / "raw" / "gold_1min_20251101_.csv"
     df_1min = pd.read_csv(
-        'data/raw/gold_1min_20251101_.csv',
+        gold_csv_path,
         parse_dates=['日時']
     )
     
@@ -230,12 +236,11 @@ def main():
     
     # 保存
     print("\n[3/4] データ保存中...")
-    output_dir = Path('data/derived')
+    output_dir = SCRIPT_DIR / "data" / "derived"
     output_dir.mkdir(parents=True, exist_ok=True)
-    
     output_path = output_dir / 'daily_aggregates.parquet'
     df_aggregates.to_parquet(output_path, index=False)
-    print(f"  保存完了: {output_path}")
+    print(f"   保存完了: {output_path}")
     
     # サマリー表示
     print("\n[4/4] サマリー")
