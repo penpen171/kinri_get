@@ -9,7 +9,6 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 
 st.set_page_config(page_title="ゴールド戦略シミュレータ", page_icon="💎", layout="wide")
-
 st.title("💎 ゴールド戦略シミュレータ")
 st.markdown("レバレッジ500倍×閉場前ポジション戦略の分析ツール")
 
@@ -90,26 +89,33 @@ judgment_hours = judgment_options[judgment_period_label]
 
 # データ読み込み
 @st.cache_data
-def load_data(limit_rows=None):
-    """日次集計データを読み込み"""
-    path = APP_DIR / "data" / "derived" / "daily_aggregates.parquet"
+def load_data(threshold_min=2, judgment_hours=None):
+    """
+    指定された判定条件のファイルを読み込む（B案: ファイル分割版）
+    """
+    # ファイル名を生成
+    if judgment_hours is None:
+        j_label = 'close'
+    else:
+        j_label = int(judgment_hours)
+
+    filename = f"daily_aggregates_t{threshold_min}_j{j_label}.parquet"
+    path = APP_DIR / "data" / "derived" / filename
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"データファイルが見つかりません: {filename}\n"
+            f"build_daily_aggregates.py を実行してください。"
+        )
+
     df = pd.read_parquet(path)
-    
-    # テスト用：最新N行に制限
-    if limit_rows is not None:
-        df = df.tail(limit_rows)
-        st.warning(f"⚠️ テスト版：最新{limit_rows}日のみ表示")
-    
     return df
 
 @st.cache_data
 def load_1min_data():
     """1分足データを読み込み"""
     path = APP_DIR / "data" / "raw" / "gold_1min_20251101_.csv"
-    df = pd.read_csv(
-        path,
-        parse_dates=['日時']
-    )
+    df = pd.read_csv(path, parse_dates=['日時'])
     df = df.rename(columns={
         '日時': 'timestamp',
         '始値': 'open',
@@ -124,25 +130,31 @@ def load_1min_data():
 def load_model():
     return SimpleAFModel()
 
-# メイン処理
 try:
-    df = load_data(limit_rows=100)  # テスト版：100日のみ
+    # 選択された判定期間に応じたファイルを読み込む
+    df = load_data(
+        threshold_min=DEFAULT_THRESHOLD_MIN,
+        judgment_hours=judgment_hours
+    )
+
+    st.info(f"📊 読み込んだデータ: {len(df)} 件（判定期間: {judgment_period_label}）")
+
     df_1min = load_1min_data()
     model = load_model()
-    
+
     # ロスカット目安を表示
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📉 ロスカット目安")
     entry_sample = 5000.0
-    
+
     # 追加証拠金なしの場合
     liq_price_base = model.calc_liq_price_long(entry_sample, leverage, position_margin, 0)
     liq_distance_pct_base = model.calc_liq_distance_pct(leverage, position_margin, 0)
-    
+
     # 追加証拠金ありの場合
     liq_price_with_add = model.calc_liq_price_long(entry_sample, leverage, position_margin, additional_margin)
     liq_distance_pct_with_add = model.calc_liq_distance_pct(leverage, position_margin, additional_margin)
-    
+
     col_liq1, col_liq2 = st.sidebar.columns(2)
     with col_liq1:
         st.metric(
@@ -151,7 +163,7 @@ try:
             help="追加証拠金なしの場合"
         )
         st.caption(f"${entry_sample:,.0f} → ${liq_price_base:,.0f}")
-    
+
     with col_liq2:
         st.metric(
             "追加後",
@@ -160,12 +172,8 @@ try:
             help="追加証拠金込みの場合"
         )
         st.caption(f"${entry_sample:,.0f} → ${liq_price_with_add:,.0f}")
-    
+
     # 判定実行
-    st.write("🔵 ステップ4: 判定処理開始")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
     with st.spinner(f'判定中...（{len(df)}件のデータ）'):
         results = judge_all(
             df,
@@ -177,58 +185,49 @@ try:
             judgment_hours=judgment_hours,
             df_1min=df_1min
         )
-    
-    progress_bar.progress(100)
-    status_text.text("✅ 判定完了！")
-    st.write("✅ ステップ5: 処理完了")
-    
+
     stats = calculate_statistics(results)
-    
+
     # 統計情報を表示
     col1, col2, col3, col4, col5 = st.columns(5)
-    
     with col1:
         st.metric("総日数", stats['total'])
-    
     with col2:
         st.metric("💎 完全勝利", f"{stats['win_count']} ({stats['win_rate']:.1f}%)")
-    
     with col3:
         st.metric("✅ 回復", stats['recovery_count'])
-    
     with col4:
         st.metric("🟠 マイナス継続", stats['warning_count'])
-    
     with col5:
         st.metric("❌ ロスカット", stats['loss_count'])
-    
+
     # タブで表示切替
     tab1, tab2, tab3 = st.tabs(["📅 カレンダー表示", "📊 詳細リスト", "📈 統計"])
-    
+
     with tab1:
         st.subheader("月次カレンダー")
-        
+
         if len(results) == 0:
             st.warning(f"データがありません。先に build_daily_aggregates.py を実行してください。")
         else:
             results_df = pd.DataFrame(results)
             results_df['year_month'] = results_df['date'].apply(lambda x: x.strftime('%Y-%m'))
-            
+
             for ym in sorted(results_df['year_month'].unique()):
                 year, month = map(int, ym.split('-'))
                 st.markdown(f"### {year}年{month}月")
+
                 month_data = results_df[results_df['year_month'] == ym]
-                
+
                 # 月曜始まりのカレンダーを作成
                 cal = calendar.monthcalendar(year, month)
-                
                 weekdays = ['月', '火', '水', '木', '金', '土', '日']
-                
+
                 table_html = '<table style="width:100%; border-collapse: collapse;"><tr>'
                 for wd in weekdays:
                     table_html += f'<th style="border: 1px solid #ddd; padding: 8px; text-align: center; background-color: #f2f2f2;">{wd}</th>'
                 table_html += '</tr>'
-                
+
                 for week in cal:
                     table_html += '<tr>'
                     for day in week:
@@ -237,12 +236,12 @@ try:
                         else:
                             date_obj = datetime(year, month, day).date()
                             day_result = month_data[month_data['date'] == date_obj]
-                            
+
                             if len(day_result) > 0:
                                 symbol = day_result.iloc[0]['symbol']
                                 detail = day_result.iloc[0]['detail']
                                 info = day_result.iloc[0]['info']
-                                
+
                                 # ❌の場合はロスカット時間を表示
                                 if '❌' in symbol and info and 'liq_time' in info:
                                     liq_time = info['liq_time']
@@ -251,8 +250,8 @@ try:
                                         display_text = f'{symbol}<br><small>{time_str}</small>'
                                     else:
                                         display_text = symbol
-                                # ⚠️/✅/🟠の場合は建値割れ時間を表示
-                                elif ('⚠️' in symbol or '✅' in symbol or '🟠' in symbol) and info and 'breach_time' in info:
+                                # ✅, 🟠の場合は建値割れ時刻を表示
+                                elif ('✅' in symbol or '🟠' in symbol or '💎' in symbol) and info and 'breach_time' in info:
                                     breach_time = info['breach_time']
                                     if pd.notna(breach_time):
                                         time_str = pd.to_datetime(breach_time).strftime('%H:%M')
@@ -261,54 +260,61 @@ try:
                                         display_text = symbol
                                 else:
                                     display_text = symbol
-                                
+
                                 table_html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: center;" title="{detail}">'
                                 table_html += f'<div style="font-weight: bold;">{day}</div><div style="font-size: 18px;">{display_text}</div></td>'
                             else:
-                                # データがない日は「閉場」と表示
+                                # データがない日は「休場」と表示（グレー）
                                 table_html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: center; color: #999;">'
-                                table_html += f'<div style="font-weight: bold;">{day}</div><div style="font-size: 12px;">閉場</div></td>'
-                    
+                                table_html += f'<div style="font-weight: bold;">{day}</div><div style="font-size: 12px;">休場</div></td>'
+
                     table_html += '</tr>'
+
                 table_html += '</table>'
                 st.markdown(table_html, unsafe_allow_html=True)
-                st.markdown("")
-    
+                st.markdown("---")
+
     with tab2:
         st.subheader("詳細リスト")
-        
+
         if len(results) == 0:
             st.warning(f"データがありません。")
         else:
             display_df = results_df[['date', 'type', 'symbol', 'detail', 'judgment_label']].copy()
-            display_df.columns = ['日付', 'タイプ', '判定', '詳細', '判定期間']
+            display_df.columns = ['日付', 'タイプ', 'シンボル', '詳細', '判定期間']
             st.dataframe(display_df, use_container_width=True, height=600)
-    
+
     with tab3:
         st.subheader("統計情報")
-        
-        st.markdown("#### 絵文字別カウント")
+
+        st.markdown("#### シンボル別集計")
         symbol_df = pd.DataFrame([
-            {'絵文字': k, 'カウント': v, '割合': f"{v/stats['total']*100:.1f}%"}
+            [k, v, f"{v/stats['total']*100:.1f}%"]
             for k, v in sorted(stats['symbol_counts'].items(), key=lambda x: -x[1])
-        ])
+        ], columns=['シンボル', '回数', '割合'])
         st.dataframe(symbol_df, use_container_width=True)
-        
+
         st.markdown("#### パラメータ")
-        param_df = pd.DataFrame([
-            {'項目': 'レバレッジ', '値': f"{leverage}x"},
-            {'項目': 'ポジション証拠金', '値': f"${position_margin:.0f}"},
-            {'項目': '追加証拠金', '値': f"${additional_margin:.0f}"},
-            {'項目': '総証拠金', '値': f"${position_margin + additional_margin:.0f}"},
-            {'項目': '開場閾値', '値': f"{DEFAULT_THRESHOLD_MIN}分（固定）"},
-            {'項目': '判定期間', '値': judgment_period_label},
-            {'項目': 'Adjustment Factor', '値': f"{model.adjustment_factor * 100}%"},
-        ])
+        param_df = pd.DataFrame({
+            "項目": ["レバレッジ", "ポジション証拠金", "追加証拠金", "合計証拠金", "閾値（分）", "判定期間", "Adjustment Factor"],
+            "値": [
+                f"{leverage}x",
+                f"${position_margin:.0f}",
+                f"${additional_margin:.0f}",
+                f"${position_margin + additional_margin:.0f}",
+                f"{DEFAULT_THRESHOLD_MIN}分",
+                judgment_period_label,
+                f"{model.adjustment_factor * 100}%"
+            ]
+        })
         st.dataframe(param_df, use_container_width=True)
 
-except FileNotFoundError:
-    st.error("データファイルが見つかりません。先に build_daily_aggregates.py を実行してください。")
+except FileNotFoundError as e:
+    st.error(f"❌ {e}")
+    st.info("💡 build_daily_aggregates.py を実行してデータを生成してください。")
+
 except Exception as e:
+    # エラー詳細を表示
     st.error(f"エラーが発生しました: {e}")
     import traceback
     st.code(traceback.format_exc())
