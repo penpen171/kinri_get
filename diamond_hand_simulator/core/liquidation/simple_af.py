@@ -29,6 +29,8 @@ class SimpleAFModel:
         self.config = self._load_config(config_path)
         self.adjustment_factor = self.config.get('adjustment_factor', 0.10)
         self.liquidation_fee_rate = self.config.get('liquidation_fee_rate', 0.0005)
+        self.price_tick = self.config.get('price_tick', 0.0)
+        self.price_compare_epsilon = self.config.get('price_compare_epsilon', 1e-9)
         
         
     def _load_config(self, config_path):
@@ -37,7 +39,12 @@ class SimpleAFModel:
         if not path.exists():
             print(f"⚠️  設定ファイルが見つかりません: {config_path}")
             print(f"   デフォルト値を使用します（AF=0.10）")
-            return {'adjustment_factor': 0.10, 'liquidation_fee_rate': 0.0005}
+            return {
+                'adjustment_factor': 0.10,
+                'liquidation_fee_rate': 0.0005,
+                'price_tick': 0.0,
+                'price_compare_epsilon': 1e-9,
+            }
         
         with open(path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f)
@@ -72,7 +79,8 @@ class SimpleAFModel:
             float: ロスカット価格
         """
         distance_pct = self.calc_liq_distance_pct(leverage, position_margin, additional_margin)
-        return entry_price * (1 - distance_pct)
+        liq_price = entry_price * (1 - distance_pct)
+        return self._normalize_price(liq_price)
     
     def calc_liq_price_short(self, entry_price, leverage, position_margin, additional_margin=0):
         """
@@ -88,7 +96,14 @@ class SimpleAFModel:
             float: ロスカット価格
         """
         distance_pct = self.calc_liq_distance_pct(leverage, position_margin, additional_margin)
-        return entry_price * (1 + distance_pct)
+        liq_price = entry_price * (1 + distance_pct)
+        return self._normalize_price(liq_price)
+
+    def _normalize_price(self, price):
+        """取引所ティック単位に合わせて価格を正規化（未設定時はそのまま）。"""
+        if not self.price_tick or self.price_tick <= 0:
+            return price
+        return round(price / self.price_tick) * self.price_tick
     
     def is_liquidated_long(self, entry_price, current_price, leverage, position_margin, additional_margin=0):
         """
@@ -105,7 +120,7 @@ class SimpleAFModel:
             bool: True=ロスカット、False=生存
         """
         liq_price = self.calc_liq_price_long(entry_price, leverage, position_margin, additional_margin)
-        return current_price <= liq_price
+        return current_price <= (liq_price + self.price_compare_epsilon)
     
     def is_liquidated_short(self, entry_price, current_price, leverage, position_margin, additional_margin=0):
         """
@@ -122,7 +137,7 @@ class SimpleAFModel:
             bool: True=ロスカット、False=生存
         """
         liq_price = self.calc_liq_price_short(entry_price, leverage, position_margin, additional_margin)
-        return current_price >= liq_price
+        return current_price >= (liq_price - self.price_compare_epsilon)
     
     def get_info(self):
         """モデル情報を返す"""
@@ -130,6 +145,8 @@ class SimpleAFModel:
             'model': 'SimpleAF',
             'adjustment_factor': self.adjustment_factor,
             'liquidation_fee_rate': self.liquidation_fee_rate,
+            'price_tick': self.price_tick,
+            'price_compare_epsilon': self.price_compare_epsilon,
             'description': 'Adjustment Factor ベースの簡易ロスカット計算（追加証拠金対応）'
         }
 

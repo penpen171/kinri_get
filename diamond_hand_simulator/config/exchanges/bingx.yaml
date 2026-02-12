@@ -6,6 +6,11 @@
 # 損失がこの割合に達すると強制清算
 adjustment_factor: 0.1
 
+# 価格比較の安定化パラメータ（Phase1）
+# 境界値付近の浮動小数差で判定が反転するのを抑制
+price_tick: 0.0
+price_compare_epsilon: 1e-9
+
 # 清算手数料率（将来の精度向上用）
 liquidation_fee_rate: 0.0005
 
