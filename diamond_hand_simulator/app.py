@@ -280,8 +280,43 @@ try:
         if len(results) == 0:
             st.warning(f"データがありません。")
         else:
-            display_df = results_df[['date', 'type', 'symbol', 'detail', 'judgment_label']].copy()
-            display_df.columns = ['日付', 'タイプ', 'シンボル', '詳細', '判定期間']
+            detail_df = pd.DataFrame(results)
+
+            def format_price(value):
+                if pd.isna(value):
+                    return "-"
+                return f"${value:,.2f}"
+
+            def format_time(ts):
+                if pd.isna(ts):
+                    return "不明"
+                return pd.to_datetime(ts).strftime('%H:%M')
+
+            def format_extreme(row, kind):
+                if kind == 'high':
+                    price = row.get('phase2_high')
+                    ts = row.get('phase2_high_time')
+                else:
+                    price = row.get('phase2_low')
+                    ts = row.get('phase2_low_time')
+
+                entry = row.get('entry')
+                if pd.isna(price) or pd.isna(entry):
+                    return "-"
+
+                diff = price - entry
+                sign = '+' if diff >= 0 else '-'
+                return f"{format_time(ts)} ({sign}${abs(diff):,.2f})"
+
+            display_df = pd.DataFrame({
+                '日付': detail_df['date'],
+                'シンボル': detail_df['symbol'],
+                '建値': detail_df['entry'].apply(format_price),
+                '最高値': detail_df.apply(lambda row: format_extreme(row, 'high'), axis=1),
+                '最底値': detail_df.apply(lambda row: format_extreme(row, 'low'), axis=1),
+                '詳細': detail_df['detail']
+            })
+
             st.dataframe(display_df, use_container_width=True, height=600)
 
     with tab3:
