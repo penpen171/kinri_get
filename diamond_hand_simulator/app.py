@@ -126,8 +126,14 @@ def load_1min_data():
     df.set_index('timestamp', inplace=True)
     return df
 
+def _exchange_config_signature():
+    """モデル設定の変更をキャッシュキーに反映するためのシグネチャ。"""
+    config_path = APP_DIR / "config" / "exchanges" / "bingx.yaml"
+    return config_path.read_text(encoding='utf-8')
+
+
 @st.cache_resource
-def load_model():
+def load_model(config_signature):
     return SimpleAFModel()
 
 try:
@@ -140,7 +146,7 @@ try:
     st.info(f"📊 読み込んだデータ: {len(df)} 件（判定期間: {judgment_period_label}）")
 
     df_1min = load_1min_data()
-    model = load_model()
+    model = load_model(_exchange_config_signature())
 
     # ロスカット目安を表示
     st.sidebar.markdown("---")
