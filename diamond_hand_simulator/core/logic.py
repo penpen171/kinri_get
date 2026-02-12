@@ -50,6 +50,25 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
     phase2_low = row['phase2_low']
     phase2_breach_long_time = row['phase2_breach_long_time']
 
+    threshold_time = row['threshold_time']
+    judgment_end_time = row['judgment_end_time']
+
+    phase2_high_time = pd.NaT
+    phase2_low_time = pd.NaT
+    df_phase2 = None
+
+    if df_1min is not None:
+        df_phase2 = df_1min[
+            (df_1min.index >= threshold_time) &
+            (df_1min.index < judgment_end_time)
+        ]
+
+        if len(df_phase2) > 0:
+            phase2_high = df_phase2['high'].max()
+            phase2_low = df_phase2['low'].min()
+            phase2_high_time = df_phase2['high'].idxmax()
+            phase2_low_time = df_phase2['low'].idxmin()
+
     # ロスカット価格を計算（追加証拠金込み）
     liq_price_long = liq_model.calc_liq_price_long(long_entry, leverage, position_margin, additional_margin)
     liq_price_short = liq_model.calc_liq_price_short(short_entry, leverage, position_margin, additional_margin)
@@ -77,7 +96,12 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'detail': f'開場{row["threshold_min"]}分以内にロング/ショート共にロスカット',
             'info': None,
             'judgment_label': judgment_label,
-            'judgment_hours_actual': judgment_hours_actual
+            'judgment_hours_actual': judgment_hours_actual,
+            'entry': long_entry,
+            'phase2_high': phase2_high,
+            'phase2_high_time': phase2_high_time,
+            'phase2_low': phase2_low,
+            'phase2_low_time': phase2_low_time
         }
 
     # ===== 第2ロジック：閾値以降〜判定終了時刻での判定 =====
@@ -94,14 +118,7 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             liq_time_str = "不明"
             liq_time = pd.NaT
 
-            if df_1min is not None:
-                threshold_time = row['threshold_time']
-                judgment_end_time = row['judgment_end_time']
-                df_phase2 = df_1min[
-                    (df_1min.index >= threshold_time) &
-                    (df_1min.index < judgment_end_time)
-                ]
-
+            if df_phase2 is not None:
                 # ロスカット価格を下回った最初の時刻
                 liq_candles = df_phase2[df_phase2['low'] <= liq_price_long]
                 if len(liq_candles) > 0:
@@ -113,7 +130,11 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             info = {
                 'liq_time': liq_time,
                 'liq_price': liq_price_long,
-                'entry': long_entry
+                'entry': long_entry,
+                'phase2_high': phase2_high,
+                'phase2_high_time': phase2_high_time,
+                'phase2_low': phase2_low,
+                'phase2_low_time': phase2_low_time
             }
 
         elif breached_entry:
@@ -132,7 +153,10 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             info = {
                 'closest_distance': distance_from_entry,
                 'entry': long_entry,
+                'phase2_high': phase2_high,
+                'phase2_high_time': phase2_high_time,
                 'phase2_low': phase2_low,
+                'phase2_low_time': phase2_low_time,
                 'breach_time': phase2_breach_long_time
             }
 
@@ -144,7 +168,10 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             info = {
                 'closest_distance': closest_distance,
                 'entry': long_entry,
-                'phase2_low': phase2_low
+                'phase2_high': phase2_high,
+                'phase2_high_time': phase2_high_time,
+                'phase2_low': phase2_low,
+                'phase2_low_time': phase2_low_time
             }
 
         return {
@@ -154,7 +181,12 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'detail': detail,
             'info': info,
             'judgment_label': judgment_label,
-            'judgment_hours_actual': judgment_hours_actual
+            'judgment_hours_actual': judgment_hours_actual,
+            'entry': long_entry,
+            'phase2_high': phase2_high,
+            'phase2_high_time': phase2_high_time,
+            'phase2_low': phase2_low,
+            'phase2_low_time': phase2_low_time
         }
 
     elif position_type == 'SHORT':
@@ -172,9 +204,20 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'type': market_type,
             'symbol': f'{phase1_result} → {symbol}',
             'detail': detail,
-            'info': {'phase2_low': phase2_low, 'entry': short_entry},
+            'info': {
+                'phase2_high': phase2_high,
+                'phase2_high_time': phase2_high_time,
+                'phase2_low': phase2_low,
+                'phase2_low_time': phase2_low_time,
+                'entry': short_entry
+            },
             'judgment_label': judgment_label,
-            'judgment_hours_actual': judgment_hours_actual
+            'judgment_hours_actual': judgment_hours_actual,
+            'entry': short_entry,
+            'phase2_high': phase2_high,
+            'phase2_high_time': phase2_high_time,
+            'phase2_low': phase2_low,
+            'phase2_low_time': phase2_low_time
         }
 
 
