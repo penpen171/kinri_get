@@ -3,7 +3,7 @@ import pandas as pd
 import calendar
 from datetime import datetime
 from core.logic import judge_all, calculate_statistics, DEFAULT_THRESHOLD_MIN, DEFAULT_JUDGMENT_HOURS
-from core.liquidation.simple_af import SimpleAFModel
+from core.liquidation import create_liquidation_model
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
@@ -137,7 +137,8 @@ def _exchange_config_signature():
 
 @st.cache_resource
 def load_model(config_signature):
-    return SimpleAFModel()
+    _ = config_signature
+    return create_liquidation_model()
 
 try:
     # 選択された判定期間に応じたファイルを読み込む

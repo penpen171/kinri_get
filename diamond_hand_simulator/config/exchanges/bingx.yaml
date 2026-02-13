@@ -1,9 +1,12 @@
 # BingX取引所の設定（分離マージン）
 # NCCOGOLD2USD-USDT 無期限先物
 
-# Adjustment Factor（調整係数）
-# BingXの強制清算ルールで使用される係数
-# 損失がこの割合に達すると強制清算
+# 利用するロスカットモデル
+# - tier_mm: ティア別 mm_rate を使う（Phase2）
+# - simple_af: 従来の単一 adjustment_factor
+liquidation_model: tier_mm
+
+# Adjustment Factor（従来モデル用・後方互換）
 adjustment_factor: 0.1
 
 # 開場基準足の選択（Phase1.9）
@@ -18,30 +21,33 @@ price_compare_epsilon: 1e-9
 # 清算手数料率（将来の精度向上用）
 liquidation_fee_rate: 0.0005
 
-# 維持証拠金率ティア（将来の精度向上用）
-# ポジションサイズに応じて維持証拠金率が変わる
+# ティア別 維持証拠金率 (Phase2)
+# notional は基本: entry_price * qty
+# max_notional: null は上限なし（無限大）
+default_mm_rate: 0.001
+tiers:
+  - min_notional: 0
+    max_notional: 4000000
+    mm_rate: 0.001
+
+  - min_notional: 4000000
+    max_notional: 6000000
+    mm_rate: 0.0015
+
+  - min_notional: 6000000
+    max_notional: 10000000
+    mm_rate: 0.002
+
+  - min_notional: 10000000
+    max_notional: null
+    mm_rate: 0.003
+
+# 旧キー（legacy）。tier_mm では tiers を優先する。
 maintenance_margin_tiers:
-  - notional_max: 50000        # USD
-    maintenance_rate: 0.005    # 0.5%
+  - notional_max: 50000
+    maintenance_rate: 0.005
     maintenance_amount: 0
 
-  - notional_max: 250000       # USD
-    maintenance_rate: 0.010    # 1.0%
-    maintenance_amount: 250
-
-  - notional_max: 1000000      # USD
-    maintenance_rate: 0.015    # 1.5%
-    maintenance_amount: 1500
-
-  - notional_max: 5000000      # USD
-    maintenance_rate: 0.025    # 2.5%
-    maintenance_amount: 11500
-
-  - notional_max: 10000000     # USD
-    maintenance_rate: 0.050    # 5.0%
-    maintenance_amount: 136500
-
 # 備考
-# - adjustment_factor は公式ドキュメントの例示値（0.10 = 10%）を使用
-# - 実際の清算価格は資金調達率や未実現損益によって変動する可能性あり
-# - v1では簡易計算、v2以降で維持証拠金ティアを考慮
+# - v2（Phase2）ではティア別 mm_rate を使用
+# - v1比較用に adjustment_factor は残す
