@@ -13,6 +13,12 @@ DEFAULT_THRESHOLD_MIN = 2  # デフォルトの閾値（分）
 DEFAULT_JUDGMENT_HOURS = None  # デフォルトの判定時間（None = 次の閉場まで）
 
 
+def append_open_bar_skip_detail(detail, skip_minutes):
+    if pd.notna(skip_minutes) and int(skip_minutes) > 0:
+        return f"{detail} | open bar skipped: +{int(skip_minutes)}min"
+    return detail
+
+
 def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df_1min=None):
     """
     1日分のデータを判定（高速化版）
@@ -52,6 +58,7 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
 
     threshold_time = row['threshold_time']
     judgment_end_time = row['judgment_end_time']
+    skip_minutes = row.get('skip_minutes', 0)
 
     phase2_high_time = pd.NaT
     phase2_low_time = pd.NaT
@@ -93,7 +100,7 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'date': date,
             'type': market_type,
             'symbol': '🔵',
-            'detail': f'開場{row["threshold_min"]}分以内にロング/ショート共にロスカット',
+            'detail': append_open_bar_skip_detail(f'開場{row["threshold_min"]}分以内にロング/ショート共にロスカット', skip_minutes),
             'info': None,
             'judgment_label': judgment_label,
             'judgment_hours_actual': judgment_hours_actual,
@@ -101,7 +108,8 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'phase2_high': phase2_high,
             'phase2_high_time': phase2_high_time,
             'phase2_low': phase2_low,
-            'phase2_low_time': phase2_low_time
+            'phase2_low_time': phase2_low_time,
+            'skip_minutes': skip_minutes
         }
 
     # ===== 第2ロジック：閾値以降〜判定終了時刻での判定 =====
@@ -126,7 +134,7 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
                     liq_time_str = liq_time.strftime("%H:%M")
 
             symbol = '❌'
-            detail = f'ロスカット（{liq_time_str}）'
+            detail = append_open_bar_skip_detail(f'ロスカット（{liq_time_str}）', skip_minutes)
             info = {
                 'liq_time': liq_time,
                 'liq_price': liq_price_long,
@@ -145,10 +153,10 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             # 仮の基準：建値から0.5%以内なら回復と見なす
             if distance_pct < 0.5:
                 symbol = '✅'
-                detail = f'建値割れ後回復（最大-${distance_from_entry:.2f}、{phase2_breach_long_time.strftime("%H:%M") if pd.notna(phase2_breach_long_time) else "不明"}）'
+                detail = append_open_bar_skip_detail(f'建値割れ後回復（最大-${distance_from_entry:.2f}、{phase2_breach_long_time.strftime("%H:%M") if pd.notna(phase2_breach_long_time) else "不明"}）', skip_minutes)
             else:
                 symbol = '🟠'
-                detail = f'マイナス継続（最大-${distance_from_entry:.2f}、{phase2_breach_long_time.strftime("%H:%M") if pd.notna(phase2_breach_long_time) else "不明"}）'
+                detail = append_open_bar_skip_detail(f'マイナス継続（最大-${distance_from_entry:.2f}、{phase2_breach_long_time.strftime("%H:%M") if pd.notna(phase2_breach_long_time) else "不明"}）', skip_minutes)
 
             info = {
                 'closest_distance': distance_from_entry,
@@ -164,7 +172,7 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             # 💎 完全勝利
             symbol = '💎'
             closest_distance = long_entry - phase2_low
-            detail = f'完全勝利（最小+${closest_distance:.2f}）'
+            detail = append_open_bar_skip_detail(f'完全勝利（最小+${closest_distance:.2f}）', skip_minutes)
             info = {
                 'closest_distance': closest_distance,
                 'entry': long_entry,
@@ -186,7 +194,8 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'phase2_high': phase2_high,
             'phase2_high_time': phase2_high_time,
             'phase2_low': phase2_low,
-            'phase2_low_time': phase2_low_time
+            'phase2_low_time': phase2_low_time,
+            'skip_minutes': skip_minutes
         }
 
     elif position_type == 'SHORT':
@@ -194,10 +203,10 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
 
         if breached_entry:
             symbol = '⤴️'
-            detail = f'建値上抜け'
+            detail = append_open_bar_skip_detail('建値上抜け', skip_minutes)
         else:
             symbol = '⏬'
-            detail = f'終日マイナス（最低値: ${phase2_low:.2f}）'
+            detail = append_open_bar_skip_detail(f'終日マイナス（最低値: ${phase2_low:.2f}）', skip_minutes)
 
         return {
             'date': date,
@@ -217,7 +226,8 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'phase2_high': phase2_high,
             'phase2_high_time': phase2_high_time,
             'phase2_low': phase2_low,
-            'phase2_low_time': phase2_low_time
+            'phase2_low_time': phase2_low_time,
+            'skip_minutes': skip_minutes
         }
 
 
