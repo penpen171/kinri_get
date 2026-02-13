@@ -109,6 +109,9 @@ def load_data(threshold_min=2, judgment_hours=None):
         )
 
     df = pd.read_parquet(path)
+    
+    st.sidebar.info(f"Aggregates file: {path}")
+    
     return df
 
 @st.cache_data
