@@ -9,6 +9,39 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import timedelta
+import yaml
+
+from core.open_reference import (
+    DEFAULT_OPEN_BAR_MAX_SKIP,
+    DEFAULT_OPEN_BAR_OFFSET_MINUTES,
+    DEFAULT_PRICE_TICK_FALLBACK,
+    resolve_price_tick,
+    select_open_reference_bar,
+)
+
+
+def load_exchange_settings(config_path):
+    settings = {
+        'open_bar_offset_minutes': DEFAULT_OPEN_BAR_OFFSET_MINUTES,
+        'open_bar_max_skip': DEFAULT_OPEN_BAR_MAX_SKIP,
+        'price_tick': DEFAULT_PRICE_TICK_FALLBACK,
+    }
+
+    path = Path(config_path)
+    if not path.exists():
+        return settings
+
+    with open(path, 'r', encoding='utf-8') as f:
+        loaded = yaml.safe_load(f) or {}
+
+    settings['open_bar_offset_minutes'] = int(
+        loaded.get('open_bar_offset_minutes', settings['open_bar_offset_minutes'])
+    )
+    settings['open_bar_max_skip'] = int(
+        loaded.get('open_bar_max_skip', settings['open_bar_max_skip'])
+    )
+    settings['price_tick'] = resolve_price_tick(loaded.get('price_tick'), settings['price_tick'])
+    return settings
 
 def calc_phase2_stats(df_phase2, long_entry):
     """
@@ -57,7 +90,10 @@ def calc_phase2_stats(df_phase2, long_entry):
     }
 
 def process_daily_data(df_1min, df_market, threshold_minutes=[1],
-                      judgment_hours=[1, 3, 6, 12, 22, None]):
+                      judgment_hours=[1, 3, 6, 12, 22, None],
+                      open_bar_offset_minutes=DEFAULT_OPEN_BAR_OFFSET_MINUTES,
+                      open_bar_max_skip=DEFAULT_OPEN_BAR_MAX_SKIP,
+                      price_tick=DEFAULT_PRICE_TICK_FALLBACK):
     """
     日次集計データを作成
     """
@@ -95,12 +131,28 @@ def process_daily_data(df_1min, df_market, threshold_minutes=[1],
         # 実際の開場期間（時間）
         actual_session_hours = (next_close_time - open_time).total_seconds() / 3600
 
+        # 基準足を選択（開場+offset を基本に、値動きなしなら最大 skip 本先へ）
+        open_bar, skip_minutes = select_open_reference_bar(
+            bars_df=df_session,
+            open_time=open_time,
+            offset_min=open_bar_offset_minutes,
+            max_skip=open_bar_max_skip,
+            price_tick=price_tick,
+        )
+        if open_bar is None:
+            continue
+
+        reference_open_time = open_bar.name
+
         # 各閾値で処理
         for threshold_min in threshold_minutes:
-            threshold_time = open_time + timedelta(minutes=threshold_min)
+            threshold_time = reference_open_time + timedelta(minutes=threshold_min)
 
-            # Phase1: 開場〜閾値
-            df_phase1 = df_session[df_session.index < threshold_time]
+            # Phase1: 基準足〜閾値
+            df_phase1 = df_session[
+                (df_session.index >= reference_open_time) &
+                (df_session.index < threshold_time)
+            ]
             if len(df_phase1) == 0:
                 continue
 
@@ -113,12 +165,12 @@ def process_daily_data(df_1min, df_market, threshold_minutes=[1],
                 if judgment_hour is None:
                     judgment_end_time = next_close_time
                     judgment_label = "次の閉場"
-                    judgment_hours_actual = actual_session_hours
+                    judgment_hours_actual = (judgment_end_time - reference_open_time).total_seconds() / 3600
                 else:
-                    specified_end_time = open_time + timedelta(hours=judgment_hour)
+                    specified_end_time = reference_open_time + timedelta(hours=judgment_hour)
                     judgment_end_time = min(specified_end_time, next_close_time)
                     judgment_label = f"{judgment_hour}h"
-                    judgment_hours_actual = (judgment_end_time - open_time).total_seconds() / 3600
+                    judgment_hours_actual = (judgment_end_time - reference_open_time).total_seconds() / 3600
 
                 # Phase2: 閾値〜判定終了時刻
                 df_phase2 = df_session[
@@ -132,6 +184,8 @@ def process_daily_data(df_1min, df_market, threshold_minutes=[1],
                     'date': open_time.date(),
                     'close_time': close_time,
                     'open_time': open_time,
+                    'reference_open_time': reference_open_time,
+                    'skip_minutes': skip_minutes,
                     'next_close_time': next_close_time,
                     'type': row['タイプ'],
                     'threshold_min': threshold_min,
@@ -198,6 +252,10 @@ def main():
     })
     print(f"   市場休場データ: {len(df_market)}行")
 
+    exchange_settings = load_exchange_settings(
+        SCRIPT_DIR / "config" / "exchanges" / "bingx.yaml"
+    )
+
     # 集計処理
     print("\n[2/5] 日次集計中...")
     print("   閾値: 1-5分")
@@ -208,7 +266,10 @@ def main():
         df_market,
         threshold_minutes=[1, 2, 3, 4, 5],
         judgment_hours=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-                       13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, None]
+                       13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, None],
+        open_bar_offset_minutes=exchange_settings['open_bar_offset_minutes'],
+        open_bar_max_skip=exchange_settings['open_bar_max_skip'],
+        price_tick=exchange_settings['price_tick'],
     )
 
     print(f"   集計完了: {len(df_aggregates)}行")

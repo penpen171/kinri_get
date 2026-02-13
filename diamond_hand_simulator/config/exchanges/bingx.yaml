@@ -6,6 +6,10 @@
 # 損失がこの割合に達すると強制清算
 adjustment_factor: 0.1
 
+# 開場基準足の選択（Phase1.9）
+open_bar_offset_minutes: 1
+open_bar_max_skip: 3
+
 # 価格比較の安定化パラメータ（Phase1）
 # 境界値付近の浮動小数差で判定が反転するのを抑制
 price_tick: 0.0
