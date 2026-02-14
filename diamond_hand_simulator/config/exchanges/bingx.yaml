@@ -64,6 +64,10 @@ tiers:
     max_notional: 90000000
     mm_rate: 0.25
 
+  - min_notional: 90000000
+    max_notional: null
+    mm_rate: 0.5
+
 
 # 旧キー（legacy）。tier_mm では tiers を優先する。
 maintenance_margin_tiers:
