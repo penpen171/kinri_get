@@ -25,6 +25,8 @@ liquidation_fee_rate: 0.0005
 # notional は基本: entry_price * qty
 # max_notional: null は上限なし（無限大）
 default_mm_rate: 0.001
+# 手数料などを直接入れない代わりに安全側へ寄せる係数（1.0=補正なし）
+safety_multiplier: 1.0
 tiers:
   - min_notional: 0
     max_notional: 4000000
