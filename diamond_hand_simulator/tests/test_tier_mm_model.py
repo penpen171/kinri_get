@@ -56,3 +56,41 @@ def test_mm_rate_monotonic_effect_on_distance_and_liq_price(tier_model):
     # mm_rate上昇で distance は縮小し、liq price は建値に近づく（longなら上がる）
     assert d_high_mm < d_low_mm
     assert p_high_mm > p_low_mm
+
+
+def test_safety_multiplier_increase_reduces_liq_distance_pct(tmp_path):
+    cfg_base = {
+        'price_tick': 0.0,
+        'price_compare_epsilon': 1e-9,
+        'tiers': [
+            {'min_notional': 0, 'max_notional': 500, 'mm_rate': 0.01},
+            {'min_notional': 500, 'max_notional': None, 'mm_rate': 0.02},
+        ],
+    }
+
+    path_1 = tmp_path / 'bingx_safety_1.yaml'
+    path_12 = tmp_path / 'bingx_safety_12.yaml'
+
+    cfg_s1 = dict(cfg_base, safety_multiplier=1.0)
+    cfg_s12 = dict(cfg_base, safety_multiplier=1.2)
+
+    path_1.write_text(yaml.safe_dump(cfg_s1), encoding='utf-8')
+    path_12.write_text(yaml.safe_dump(cfg_s12), encoding='utf-8')
+
+    model_s1 = TierMMModel(config_path=str(path_1))
+    model_s12 = TierMMModel(config_path=str(path_12))
+
+    distance_s1 = model_s1.calc_liq_distance_pct(
+        leverage=10,
+        position_margin=100,
+        entry_price=100,
+        qty=1,
+    )
+    distance_s12 = model_s12.calc_liq_distance_pct(
+        leverage=10,
+        position_margin=100,
+        entry_price=100,
+        qty=1,
+    )
+
+    assert distance_s12 < distance_s1
