@@ -99,6 +99,10 @@ class TierMMModel:
         total_margin = position_margin + additional_margin
         notional = self._infer_notional(leverage, position_margin, entry_price, qty)
         mm_rate = self._resolve_mm_rate(notional)
+        self.current_mm_rate = mm_rate
+        self.current_notional = notional  # 任意（デバッグに便利）
+        print(f"[TierMM] notional={notional:.2f}, mm_rate={mm_rate:.6f}, total_margin={total_margin:.2f}")
+
 
         # 距離 = 総証拠金率 - 維持証拠金率
         distance_pct = (total_margin / notional) - mm_rate

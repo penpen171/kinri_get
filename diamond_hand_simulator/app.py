@@ -152,6 +152,22 @@ try:
     df_1min = load_1min_data()
     model = load_model(_exchange_config_signature())
 
+    # TierMM の場合、mm_rate を確実に計算させて表示する
+    info = model.get_info() if hasattr(model, "get_info") else {}
+    if info.get("model") == "TierMM":
+        # 目安表示の計算を1回走らせて current_mm_rate を更新させる
+        _ = model.calc_liq_distance_pct(
+            leverage=leverage,
+            position_margin=position_margin,
+            additional_margin=additional_margin,
+            entry_price=5000,  # 目安用の基準価格（既存の基準変数があるならそれに置換）
+        )
+        mm_rate = getattr(model, "current_mm_rate", None)
+        notional = getattr(model, "current_notional", None)
+        if mm_rate is not None:
+            st.sidebar.caption(f"TierMM: mm_rate={mm_rate*100:.3f}%  notional≈{notional:,.0f}")
+
+
     # ロスカット目安を表示
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📉 ロスカット目安")
@@ -341,7 +357,7 @@ try:
 
         st.markdown("#### パラメータ")
         param_df = pd.DataFrame({
-            "項目": ["レバレッジ", "ポジション証拠金", "追加証拠金", "合計証拠金", "閾値（分）", "判定期間", "Adjustment Factor"],
+            "項目": ["レバレッジ", "ポジション証拠金", "追加証拠金", "合計証拠金", "閾値（分）", "判定期間"],
             "値": [
                 f"{leverage}x",
                 f"${position_margin:.0f}",
@@ -349,10 +365,26 @@ try:
                 f"${position_margin + additional_margin:.0f}",
                 f"{DEFAULT_THRESHOLD_MIN}分",
                 judgment_period_label,
-                f"{model.adjustment_factor * 100}%"
-            ]
+            ],
         })
         st.dataframe(param_df, use_container_width=True)
+
+        # ---- ロスカットモデル情報（DataFrameの外で表示）----
+        if hasattr(model, "adjustment_factor"):
+            st.write(f"Adjustment Factor: {model.adjustment_factor * 100:.4f}%")
+        else:
+            mm_rate = getattr(model, "current_mm_rate", None)
+            notional = getattr(model, "current_notional", None)
+
+            if mm_rate is not None:
+                if notional is not None:
+                    st.write(f"TierMMModel: notional={notional:,.0f}, mm_rate={mm_rate*100:.3f}%")
+                else:
+                    st.write(f"TierMMModel: mm_rate={mm_rate*100:.3f}%")
+            else:
+                st.write("TierMMModel: mm_rate not computed yet (run a calculation first)")
+
+
 
 except FileNotFoundError as e:
     st.error(f"❌ {e}")
