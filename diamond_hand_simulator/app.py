@@ -447,7 +447,14 @@ try:
             skip_only = filter_col3.checkbox('skip_minutes > 0 のみ')
             loss_only = filter_col3.checkbox('ロスカット発生日のみ')
 
-            tier_values = pd.to_numeric(detail_df.get('used_tier_index'), errors='coerce').dropna()
+            # --- used_tier_index の値を安全に取り出す（Series前提にする） ---
+            if isinstance(detail_df, pd.DataFrame) and ("used_tier_index" in detail_df.columns):
+                tier_series = pd.to_numeric(detail_df["used_tier_index"], errors="coerce")
+            else:
+                tier_series = pd.Series([], dtype="float64")
+
+            tier_values = tier_series.dropna()
+
             tier_range = None
             if not tier_values.empty:
                 tier_min = int(tier_values.min())
