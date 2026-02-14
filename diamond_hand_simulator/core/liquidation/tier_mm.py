@@ -18,6 +18,9 @@ class TierMMModel:
         self.price_tick = self.config.get('price_tick', 0.0)
         self.price_compare_epsilon = self.config.get('price_compare_epsilon', 1e-9)
         self.default_mm_rate = self.config.get('default_mm_rate', 0.001)
+        self.safety_multiplier = self._sanitize_safety_multiplier(
+            self.config.get('safety_multiplier', 1.0)
+        )
         self.tiers = self._load_tiers(self.config)
 
     def _load_config(self, config_path):
@@ -30,6 +33,7 @@ class TierMMModel:
                 'price_tick': 0.0,
                 'price_compare_epsilon': 1e-9,
                 'default_mm_rate': 0.001,
+                'safety_multiplier': 1.0,
                 'tiers': [
                     {'min_notional': 0, 'max_notional': None, 'mm_rate': 0.001},
                 ],
@@ -82,6 +86,17 @@ class TierMMModel:
 
         return position_margin * leverage
 
+    def _sanitize_safety_multiplier(self, multiplier):
+        try:
+            value = float(multiplier)
+        except (TypeError, ValueError):
+            return 1.0
+
+        if value <= 0:
+            return 1.0
+
+        return min(2.0, max(0.5, value))
+
     def _resolve_mm_rate(self, notional):
         for tier in self.tiers:
             min_notional = tier.get('min_notional', 0)
@@ -99,13 +114,18 @@ class TierMMModel:
         total_margin = position_margin + additional_margin
         notional = self._infer_notional(leverage, position_margin, entry_price, qty)
         mm_rate = self._resolve_mm_rate(notional)
-        self.current_mm_rate = mm_rate
+        effective_mm_rate = mm_rate * self.safety_multiplier
+        self.current_mm_rate = effective_mm_rate
         self.current_notional = notional  # 任意（デバッグに便利）
-        print(f"[TierMM] notional={notional:.2f}, mm_rate={mm_rate:.6f}, total_margin={total_margin:.2f}")
+        print(
+            f"[TierMM] notional={notional:.2f}, mm_rate={mm_rate:.6f}, "
+            f"safety_multiplier={self.safety_multiplier:.3f}, "
+            f"effective_mm_rate={effective_mm_rate:.6f}, total_margin={total_margin:.2f}"
+        )
 
 
         # 距離 = 総証拠金率 - 維持証拠金率
-        distance_pct = (total_margin / notional) - mm_rate
+        distance_pct = (total_margin / notional) - effective_mm_rate
         return max(0.0, distance_pct)
 
     def calc_liq_price_long(self, entry_price, leverage, position_margin, additional_margin=0, qty=None):
@@ -154,6 +174,7 @@ class TierMMModel:
             'price_tick': self.price_tick,
             'price_compare_epsilon': self.price_compare_epsilon,
             'default_mm_rate': self.default_mm_rate,
+            'safety_multiplier': self.safety_multiplier,
             'tiers': self.tiers,
             'description': 'BingXのティア別維持証拠金率(mm_rate)ベースのロスカット計算',
         }
