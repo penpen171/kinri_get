@@ -307,6 +307,28 @@ try:
             st.warning(f"データがありません。")
         else:
             detail_df = pd.DataFrame(results)
+            aggregate_cols = [
+                'date',
+                'skip_minutes',
+                'used_tier_index',
+                'used_mm_rate',
+                'used_notional',
+                'used_tier_min_notional',
+                'used_tier_max_notional',
+            ]
+            aggregate_info = df.reindex(columns=aggregate_cols).copy()
+
+            if 'date' in detail_df.columns:
+                detail_df['date'] = pd.to_datetime(detail_df['date'], errors='coerce').dt.date
+            if 'date' in aggregate_info.columns:
+                aggregate_info['date'] = pd.to_datetime(aggregate_info['date'], errors='coerce').dt.date
+
+            if 'date' in detail_df.columns and 'date' in aggregate_info.columns:
+                detail_df = detail_df.merge(aggregate_info, on='date', how='left', suffixes=('', '_agg'))
+
+            if 'skip_minutes_agg' in detail_df.columns:
+                detail_df['skip_minutes'] = detail_df['skip_minutes_agg'].combine_first(detail_df.get('skip_minutes'))
+                detail_df = detail_df.drop(columns=['skip_minutes_agg'])
 
             def format_price(value):
                 if pd.isna(value):
@@ -334,16 +356,159 @@ try:
                 sign = '+' if diff >= 0 else '-'
                 return f"{format_time(ts)} ({sign}${abs(diff):,.2f})"
 
+            detail_df['曜日'] = pd.to_datetime(detail_df.get('date'), errors='coerce').dt.dayofweek
+            weekday_map = {0: '月', 1: '火', 2: '水', 3: '木', 4: '金', 5: '土', 6: '日'}
+            detail_df['曜日'] = detail_df['曜日'].map(weekday_map)
+
+            detail_df['値幅（建値との差）'] = detail_df.get('phase2_low', pd.Series(index=detail_df.index)) - detail_df.get('entry', pd.Series(index=detail_df.index))
+            detail_df['値幅（表示）'] = detail_df['値幅（建値との差）'].apply(
+                lambda v: '-' if pd.isna(v) else f"{v:+.2f}"
+            )
+            detail_df['到達時間'] = detail_df.get('phase2_low_time', pd.Series(index=detail_df.index)).apply(format_time)
+            detail_df['価格'] = detail_df.get('phase2_low', pd.Series(index=detail_df.index)).apply(format_price)
+
+            st.markdown("#### フィルタ")
+            all_symbols = sorted([s for s in detail_df.get('symbol', pd.Series(dtype='object')).dropna().unique().tolist()])
+            selected_symbols = st.multiselect(
+                "シンボル",
+                options=all_symbols,
+                default=all_symbols,
+                help="表示するシンボルを複数選択できます。"
+            )
+
+            weekday_order = ['月', '火', '水', '木', '金', '土', '日']
+            available_weekdays = [wd for wd in weekday_order if wd in detail_df['曜日'].dropna().tolist()]
+            selected_weekdays = st.multiselect(
+                "曜日",
+                options=weekday_order,
+                default=available_weekdays if available_weekdays else weekday_order,
+                help="曜日で絞り込みます（UI派生列）。"
+            )
+
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                only_skip = st.checkbox("skip_minutes > 0 のみ", value=False)
+                only_loss_cut = st.checkbox("ロスカット発生日のみ", value=False)
+            with col_f2:
+                tier_series = pd.to_numeric(detail_df.get('used_tier_index'), errors='coerce').dropna()
+                use_tier_filter = st.checkbox("used_tier_index を範囲指定", value=False)
+                tier_range = None
+                if use_tier_filter and not tier_series.empty:
+                    min_tier = int(tier_series.min())
+                    max_tier = int(tier_series.max())
+                    tier_range = st.slider("ティア範囲", min_tier, max_tier, (min_tier, max_tier))
+                elif use_tier_filter:
+                    st.caption("used_tier_index 列がないため、ティア指定は適用されません。")
+
+            filtered_df = detail_df.copy()
+            total_count = len(filtered_df)
+
+            if selected_symbols:
+                filtered_df = filtered_df[filtered_df.get('symbol').isin(selected_symbols)]
+            else:
+                filtered_df = filtered_df.iloc[0:0]
+
+            if selected_weekdays:
+                filtered_df = filtered_df[filtered_df.get('曜日').isin(selected_weekdays)]
+            else:
+                filtered_df = filtered_df.iloc[0:0]
+
+            if only_skip:
+                skip_series = pd.to_numeric(filtered_df.get('skip_minutes'), errors='coerce').fillna(0)
+                filtered_df = filtered_df[skip_series > 0]
+
+            if only_loss_cut:
+                filtered_df = filtered_df[filtered_df.get('symbol', pd.Series(index=filtered_df.index, dtype='object')).astype(str).str.contains('❌', na=False)]
+
+            if tier_range is not None:
+                tier_vals = pd.to_numeric(filtered_df.get('used_tier_index'), errors='coerce')
+                filtered_df = filtered_df[tier_vals.between(tier_range[0], tier_range[1], inclusive='both')]
+
+            # プリセット + 列トグル
+            presets = {
+                '一覧': ['シンボル', '値幅（表示）', 'ロスカ有無'],
+                '分析': ['値幅（表示）', '到達時間', 'skip_minutes', '曜日'],
+                '詳細': ['値幅（表示）', '到達時間', '価格', 'used_tier_index', 'used_mm_rate', 'skip_minutes'],
+            }
             display_df = pd.DataFrame({
-                '日付': detail_df['date'],
-                'シンボル': detail_df['symbol'],
-                '建値': detail_df['entry'].apply(format_price),
-                '最高値': detail_df.apply(lambda row: format_extreme(row, 'high'), axis=1),
-                '最底値': detail_df.apply(lambda row: format_extreme(row, 'low'), axis=1),
-                '詳細': detail_df['detail']
+                '日付': filtered_df.get('date'),
+                '曜日': filtered_df.get('曜日'),
+                'シンボル': filtered_df.get('symbol'),
+                'ロスカ有無': filtered_df.get('symbol', pd.Series(index=filtered_df.index, dtype='object')).astype(str).str.contains('❌', na=False).map({True: 'あり', False: 'なし'}),
+                '建値': filtered_df.get('entry').apply(format_price),
+                '値幅（表示）': filtered_df.get('値幅（表示）'),
+                '値幅（建値との差）': filtered_df.get('値幅（建値との差）'),
+                '到達時間': filtered_df.get('到達時間'),
+                '価格': filtered_df.get('価格'),
+                'skip_minutes': filtered_df.get('skip_minutes'),
+                'used_tier_index': filtered_df.get('used_tier_index'),
+                'used_mm_rate': filtered_df.get('used_mm_rate'),
+                'used_notional': filtered_df.get('used_notional'),
+                'used_tier_min_notional': filtered_df.get('used_tier_min_notional'),
+                'used_tier_max_notional': filtered_df.get('used_tier_max_notional'),
+                '最高値': filtered_df.apply(lambda row: format_extreme(row, 'high'), axis=1),
+                '最底値': filtered_df.apply(lambda row: format_extreme(row, 'low'), axis=1),
+                '詳細': filtered_df.get('detail')
             })
 
-            st.dataframe(display_df, use_container_width=True, height=600)
+            preset = st.radio("表示プリセット", options=list(presets.keys()), horizontal=True)
+            default_columns = [c for c in presets[preset] if c in display_df.columns]
+            visible_columns = st.multiselect(
+                "表示列トグル",
+                options=display_df.columns.tolist(),
+                default=default_columns,
+            )
+
+            sort_options = display_df.columns.tolist()
+            sort_column = st.selectbox("ソート列", options=sort_options, index=sort_options.index('日付') if '日付' in sort_options else 0)
+            sort_desc = st.checkbox("降順", value=True)
+
+            if sort_column in display_df.columns:
+                display_df = display_df.sort_values(by=sort_column, ascending=not sort_desc, na_position='last')
+
+            symbol_text = ','.join(selected_symbols) if selected_symbols else 'なし'
+            weekday_text = ','.join(selected_weekdays) if selected_weekdays else 'なし'
+            state_parts = [f"シンボル={symbol_text}", f"曜日={weekday_text}"]
+            if only_skip:
+                state_parts.append("skipあり")
+            if only_loss_cut:
+                state_parts.append("ロスカットのみ")
+            if tier_range is not None:
+                state_parts.append(f"ティア={tier_range[0]}-{tier_range[1]}")
+
+            st.caption(f"表示条件：{' ｜ '.join(state_parts)}")
+            st.caption(f"表示件数：{len(display_df)} / {total_count}")
+
+            # 色付け（値幅）と極端値ハイライト
+            if '値幅（建値との差）' in display_df.columns:
+                width_num = pd.to_numeric(display_df['値幅（建値との差）'], errors='coerce')
+                extreme_threshold = width_num.abs().quantile(0.95) if width_num.notna().any() else None
+
+                def style_width(val):
+                    if pd.isna(val):
+                        return ''
+                    return 'color: #1e88e5;' if val >= 0 else 'color: #e53935;'
+
+                def highlight_extreme(row):
+                    if extreme_threshold is None:
+                        return [''] * len(row)
+                    current = pd.to_numeric(row.get('値幅（建値との差）'), errors='coerce')
+                    if pd.isna(current) or abs(current) < extreme_threshold:
+                        return [''] * len(row)
+                    return ['background-color: #fff3cd;'] * len(row)
+
+                styled_df = display_df.style.apply(highlight_extreme, axis=1).map(style_width, subset=['値幅（建値との差）'])
+                shown_df = styled_df
+            else:
+                shown_df = display_df
+
+            if visible_columns:
+                if isinstance(shown_df, pd.io.formats.style.Styler):
+                    st.dataframe(shown_df[visible_columns], use_container_width=True, height=600)
+                else:
+                    st.dataframe(shown_df[visible_columns], use_container_width=True, height=600)
+            else:
+                st.warning("表示列が選択されていません。")
 
     with tab3:
         st.subheader("統計情報")
