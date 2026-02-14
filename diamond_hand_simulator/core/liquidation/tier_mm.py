@@ -102,8 +102,13 @@ class TierMMModel:
 
         return min(2.0, max(0.5, value))
 
+<<<<<<< HEAD
     def _resolve_tier(self, notional):
         for idx, tier in enumerate(self.tiers, start=1):
+=======
+    def _resolve_mm_rate(self, notional):
+        for tier in self.tiers:
+>>>>>>> main
             min_notional = tier.get('min_notional', 0)
             max_notional = tier.get('max_notional')
 
@@ -126,8 +131,20 @@ class TierMMModel:
     def calc_liq_distance_pct(self, leverage, position_margin, additional_margin=0, entry_price=None, qty=None):
         total_margin = position_margin + additional_margin
         notional = self._infer_notional(leverage, position_margin, entry_price, qty)
+<<<<<<< HEAD
         mm_rate, tier_index, tier_min, tier_max = self._resolve_mm_rate(notional)
         effective_mm_rate = mm_rate * self.safety_multiplier
+=======
+        mm_rate = self._resolve_mm_rate(notional)
+        effective_mm_rate = mm_rate * self.safety_multiplier
+        self.current_mm_rate = effective_mm_rate
+        self.current_notional = notional  # 任意（デバッグに便利）
+        print(
+            f"[TierMM] notional={notional:.2f}, mm_rate={mm_rate:.6f}, "
+            f"safety_multiplier={self.safety_multiplier:.3f}, "
+            f"effective_mm_rate={effective_mm_rate:.6f}, total_margin={total_margin:.2f}"
+        )
+>>>>>>> main
 
         self.current_mm_rate = effective_mm_rate
         self.current_notional = notional
@@ -135,6 +152,7 @@ class TierMMModel:
         self.current_tier_min_notional = tier_min
         self.current_tier_max_notional = tier_max
 
+<<<<<<< HEAD
         print(
             f"[TierMM] notional={notional:.2f}, tier_index={tier_index}, "
             f"tier_range=[{tier_min}, {tier_max}], mm_rate={mm_rate:.6f}, "
@@ -142,6 +160,9 @@ class TierMMModel:
             f"effective_mm_rate={effective_mm_rate:.6f}, total_margin={total_margin:.2f}"
         )
 
+=======
+        # 距離 = 総証拠金率 - 維持証拠金率
+>>>>>>> main
         distance_pct = (total_margin / notional) - effective_mm_rate
         return max(0.0, distance_pct)
 
