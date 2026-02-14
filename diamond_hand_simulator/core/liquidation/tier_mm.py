@@ -102,13 +102,9 @@ class TierMMModel:
 
         return min(2.0, max(0.5, value))
 
-<<<<<<< HEAD
     def _resolve_tier(self, notional):
+        """notional に一致する tier と 1始まりの tier_index を返す。"""
         for idx, tier in enumerate(self.tiers, start=1):
-=======
-    def _resolve_mm_rate(self, notional):
-        for tier in self.tiers:
->>>>>>> main
             min_notional = tier.get('min_notional', 0)
             max_notional = tier.get('max_notional')
 
@@ -117,9 +113,11 @@ class TierMMModel:
             if max_notional is None or notional < max_notional:
                 return tier, idx
 
+        # どれにも一致しない場合は最後のティアにフォールバック
         return self.tiers[-1], len(self.tiers)
 
     def _resolve_mm_rate(self, notional):
+        """mm_rate と tierメタを返す（mm_rateは補正前）。"""
         tier, tier_index = self._resolve_tier(notional)
         return (
             tier.get('mm_rate', self.default_mm_rate),
@@ -131,40 +129,29 @@ class TierMMModel:
     def calc_liq_distance_pct(self, leverage, position_margin, additional_margin=0, entry_price=None, qty=None):
         total_margin = position_margin + additional_margin
         notional = self._infer_notional(leverage, position_margin, entry_price, qty)
-<<<<<<< HEAD
+
         mm_rate, tier_index, tier_min, tier_max = self._resolve_mm_rate(notional)
         effective_mm_rate = mm_rate * self.safety_multiplier
-=======
-        mm_rate = self._resolve_mm_rate(notional)
-        effective_mm_rate = mm_rate * self.safety_multiplier
-        self.current_mm_rate = effective_mm_rate
-        self.current_notional = notional  # 任意（デバッグに便利）
-        print(
-            f"[TierMM] notional={notional:.2f}, mm_rate={mm_rate:.6f}, "
-            f"safety_multiplier={self.safety_multiplier:.3f}, "
-            f"effective_mm_rate={effective_mm_rate:.6f}, total_margin={total_margin:.2f}"
-        )
->>>>>>> main
 
+        # 記録用メタ（Phase2.2）
         self.current_mm_rate = effective_mm_rate
         self.current_notional = notional
         self.current_tier_index = tier_index
         self.current_tier_min_notional = tier_min
         self.current_tier_max_notional = tier_max
 
-<<<<<<< HEAD
-        print(
-            f"[TierMM] notional={notional:.2f}, tier_index={tier_index}, "
-            f"tier_range=[{tier_min}, {tier_max}], mm_rate={mm_rate:.6f}, "
-            f"safety_multiplier={self.safety_multiplier:.3f}, "
-            f"effective_mm_rate={effective_mm_rate:.6f}, total_margin={total_margin:.2f}"
-        )
+        # （ログが必要なら任意で有効化。通常運用ではうるさいのでコメント推奨）
+        # print(
+        #     f"[TierMM] notional={notional:.2f}, tier_index={tier_index}, "
+        #     f"tier_range=[{tier_min}, {tier_max}], mm_rate={mm_rate:.6f}, "
+        #     f"safety_multiplier={self.safety_multiplier:.3f}, "
+        #     f"effective_mm_rate={effective_mm_rate:.6f}, total_margin={total_margin:.2f}"
+        # )
 
-=======
-        # 距離 = 総証拠金率 - 維持証拠金率
->>>>>>> main
+        # 距離 = 総証拠金率 - 維持証拠金率（補正後）
         distance_pct = (total_margin / notional) - effective_mm_rate
         return max(0.0, distance_pct)
+
 
     def calc_liq_price_long(self, entry_price, leverage, position_margin, additional_margin=0, qty=None):
         distance_pct = self.calc_liq_distance_pct(
