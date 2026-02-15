@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 import calendar
 from datetime import datetime
@@ -8,9 +8,50 @@ from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
 
+WEEKDAY_ORDER = ['月', '火', '水', '木', '金', '土', '日']
+WEEKDAY_MAP = dict(enumerate(WEEKDAY_ORDER))
+
+COLUMN_LABELS = {
+    'date': '日付',
+    'weekday_jp': '曜日',
+    'symbol': 'シンボル',
+    'move_vs_entry': '値幅（建値差）',
+    'reach_time': '到達時間',
+    'entry': '建値',
+    'target_price': '価格',
+    'low_reach_time': '最底値 到達時間',
+    'low_target_price': '最底値 価格',
+    'low_move_vs_entry': '最底値 値幅（建値差）',
+    'skip_minutes': 'skip_minutes',
+    'used_tier_index': 'used_tier_index',
+    'used_mm_rate': 'used_mm_rate',
+    'detail': '詳細',
+    'is_loss_cut': 'ロスカ有無',
+}
+
+PRESET_COLUMNS = {
+    '一覧': ['date', 'symbol', 'move_vs_entry', 'low_move_vs_entry', 'is_loss_cut', 'detail'],
+    '分析': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'low_move_vs_entry', 'low_reach_time', 'skip_minutes', 'weekday_jp', 'detail'],
+    '詳細': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'target_price', 'low_move_vs_entry', 'low_reach_time', 'low_target_price', 'used_tier_index', 'used_mm_rate', 'skip_minutes', 'detail'],
+}
+
 st.set_page_config(page_title="ゴールド戦略シミュレータ", page_icon="💎", layout="wide")
 st.title("💎 ゴールド戦略シミュレータ")
 st.markdown("レバレッジ500倍×閉場前ポジション戦略の分析ツール")
+
+st.markdown(
+    """
+    <style>
+    div[data-testid="stVerticalBlock"] div[data-testid="stHorizontalBlock"] {
+        background-color: #f5f6f7;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 0.5rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # サイドバー：パラメータ設定
 st.sidebar.header("⚙️ 設定")
@@ -139,6 +180,91 @@ def _exchange_config_signature():
 def load_model(config_signature):
     _ = config_signature
     return create_liquidation_model()
+
+
+def derive_weekday_series(date_series):
+    date_parsed = pd.to_datetime(date_series, errors='coerce')
+    return date_parsed.dt.dayofweek.map(WEEKDAY_MAP)
+
+
+def first_available(row, columns):
+    for col in columns:
+        val = row.get(col)
+        if pd.notna(val):
+            return val
+    return pd.NA
+
+
+def build_detail_view_dataframe(results_df, source_df):
+    base_df = results_df.copy()
+    base_df['date'] = pd.to_datetime(base_df.get('date'), errors='coerce').dt.date
+
+    source_meta = source_df.copy()
+    source_meta['date'] = pd.to_datetime(source_meta.get('date'), errors='coerce').dt.date
+
+    optional_cols = [
+        'date', 'skip_minutes', 'used_tier_index', 'used_mm_rate',
+        'used_notional', 'used_tier_min_notional', 'used_tier_max_notional',
+    ]
+    available_meta_cols = [c for c in optional_cols if c in source_meta.columns]
+    if available_meta_cols:
+        source_meta = source_meta[available_meta_cols].drop_duplicates(subset=['date'])
+
+    merged_df = base_df.merge(source_meta, on='date', how='left', suffixes=('', '_src'))
+
+    merged_df['weekday_jp'] = derive_weekday_series(merged_df.get('date'))
+    merged_df['is_loss_cut'] = merged_df.get('symbol', '').astype(str).str.contains('❌|🔵')
+
+    merged_df['move_vs_entry'] = merged_df.apply(
+        lambda row: row.get('phase2_high') - row.get('entry')
+        if pd.notna(row.get('phase2_high')) and pd.notna(row.get('entry')) else pd.NA,
+        axis=1,
+    )
+    merged_df['reach_time'] = merged_df.get('phase2_high_time')
+    merged_df['target_price'] = merged_df.get('phase2_high')
+
+    merged_df['low_move_vs_entry'] = merged_df.apply(
+        lambda row: row.get('phase2_low') - row.get('entry')
+        if pd.notna(row.get('phase2_low')) and pd.notna(row.get('entry')) else pd.NA,
+        axis=1,
+    )
+    merged_df['low_reach_time'] = merged_df.get('phase2_low_time')
+    merged_df['low_target_price'] = merged_df.get('phase2_low')
+    merged_df['skip_minutes'] = pd.to_numeric(merged_df.get('skip_minutes'), errors='coerce').fillna(0)
+
+    return merged_df
+
+
+def format_display_dataframe(df, selected_cols):
+    display_df = pd.DataFrame()
+    for col in selected_cols:
+        if col not in df.columns:
+            continue
+        label = COLUMN_LABELS.get(col, col)
+        if col == 'date':
+            display_df[label] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d').fillna('-')
+        elif col in ('move_vs_entry', 'low_move_vs_entry'):
+            display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"{v:+.2f}")
+        elif col in ('entry', 'target_price', 'low_target_price'):
+            display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"${v:,.2f}")
+        elif col in ('reach_time', 'low_reach_time'):
+            display_df[label] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%H:%M').fillna('-')
+        elif col == 'used_mm_rate':
+            display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"{v * 100:.3f}%")
+        elif col == 'is_loss_cut':
+            display_df[label] = df[col].apply(lambda v: 'あり' if bool(v) else 'なし')
+        elif col == 'weekday_jp':
+            display_df[label] = df[col].fillna('-')
+        elif col == 'detail':
+            display_df[label] = df.apply(
+                lambda row: f"{row.get('detail', '')} | open bar skipped: +{int(row.get('skip_minutes', 0))}min"
+                if row.get('skip_minutes', 0) > 0 and 'open bar skipped' not in str(row.get('detail', ''))
+                else row.get('detail', ''),
+                axis=1,
+            )
+        else:
+            display_df[label] = df[col]
+    return display_df
 
 try:
     # 選択された判定期間に応じたファイルを読み込む
@@ -306,44 +432,100 @@ try:
         if len(results) == 0:
             st.warning(f"データがありません。")
         else:
-            detail_df = pd.DataFrame(results)
+            detail_df = build_detail_view_dataframe(pd.DataFrame(results), df)
+            total_count = len(detail_df)
 
-            def format_price(value):
-                if pd.isna(value):
-                    return "-"
-                return f"${value:,.2f}"
+            preset = st.selectbox('列プリセット', options=list(PRESET_COLUMNS.keys()), index=0, key='detail_preset')
+            preset_cols = [c for c in PRESET_COLUMNS[preset] if c in detail_df.columns]
 
-            def format_time(ts):
-                if pd.isna(ts):
-                    return "不明"
-                return pd.to_datetime(ts).strftime('%H:%M')
+            if 'last_preset' not in st.session_state:
+                st.session_state.last_preset = preset
+            if st.session_state.get('last_preset') != preset:
+                st.session_state.last_preset = preset
+                st.session_state.pop('visible_columns', None)
+                st.rerun()
+            if 'visible_columns' not in st.session_state:
+                st.session_state.visible_columns = preset_cols
 
-            def format_extreme(row, kind):
-                if kind == 'high':
-                    price = row.get('phase2_high')
-                    ts = row.get('phase2_high_time')
-                else:
-                    price = row.get('phase2_low')
-                    ts = row.get('phase2_low_time')
+            col_candidates = [c for c in COLUMN_LABELS.keys() if c in detail_df.columns]
+            visible_cols = st.multiselect(
+                '表示列トグル',
+                options=col_candidates,
+                format_func=lambda c: COLUMN_LABELS.get(c, c),
+                key='visible_columns',
+            )
 
-                entry = row.get('entry')
-                if pd.isna(price) or pd.isna(entry):
-                    return "-"
+            st.markdown('#### フィルタ')
+            filter_col1, filter_col2, filter_col3 = st.columns(3)
 
-                diff = price - entry
-                sign = '+' if diff >= 0 else '-'
-                return f"{format_time(ts)} ({sign}${abs(diff):,.2f})"
+            symbols = sorted(detail_df.get('symbol', pd.Series(dtype='object')).dropna().unique().tolist())
+            selected_symbols = filter_col1.multiselect('シンボル', options=symbols, default=symbols)
 
-            display_df = pd.DataFrame({
-                '日付': detail_df['date'],
-                'シンボル': detail_df['symbol'],
-                '建値': detail_df['entry'].apply(format_price),
-                '最高値': detail_df.apply(lambda row: format_extreme(row, 'high'), axis=1),
-                '最底値': detail_df.apply(lambda row: format_extreme(row, 'low'), axis=1),
-                '詳細': detail_df['detail']
-            })
+            weekday_series = detail_df.get('weekday_jp', pd.Series(dtype='object')).dropna()
+            available_weekdays = [wd for wd in WEEKDAY_ORDER if wd in weekday_series.unique().tolist()]
+            selected_weekdays = filter_col2.multiselect('曜日', options=WEEKDAY_ORDER, default=available_weekdays)
 
-            st.dataframe(display_df, use_container_width=True, height=600)
+            skip_only = filter_col3.checkbox('skip_minutes > 0 のみ')
+            loss_only = filter_col3.checkbox('ロスカット発生日のみ')
+
+            tier_values = pd.to_numeric(detail_df.get('used_tier_index'), errors='coerce').dropna()
+            tier_range = None
+            if not tier_values.empty:
+                tier_min = int(tier_values.min())
+                tier_max = int(tier_values.max())
+                tier_range = st.slider('used_tier_index 範囲', min_value=tier_min, max_value=tier_max, value=(tier_min, tier_max))
+
+            filtered_df = detail_df.copy()
+            if selected_symbols:
+                filtered_df = filtered_df[filtered_df.get('symbol').isin(selected_symbols)]
+            if selected_weekdays:
+                filtered_df = filtered_df[filtered_df.get('weekday_jp').isin(selected_weekdays)]
+            if skip_only:
+                filtered_df = filtered_df[pd.to_numeric(filtered_df.get('skip_minutes'), errors='coerce').fillna(0) > 0]
+            if loss_only:
+                filtered_df = filtered_df[filtered_df.get('is_loss_cut', False)]
+            if tier_range is not None:
+                tier_col = pd.to_numeric(filtered_df.get('used_tier_index'), errors='coerce')
+                filtered_df = filtered_df[tier_col.between(tier_range[0], tier_range[1], inclusive='both')]
+
+            sort_options = [c for c in col_candidates if c != 'detail']
+            sort_key = st.selectbox('ソート列', options=sort_options, format_func=lambda c: COLUMN_LABELS.get(c, c), index=0)
+            sort_asc = st.checkbox('昇順', value=False)
+            filtered_df = filtered_df.sort_values(by=sort_key, ascending=sort_asc, na_position='last')
+
+            condition_parts = [
+                f"シンボル={','.join(selected_symbols) if selected_symbols else 'なし'}",
+                f"曜日={','.join(selected_weekdays) if selected_weekdays else 'なし'}",
+            ]
+            if skip_only:
+                condition_parts.append('skipあり')
+            if loss_only:
+                condition_parts.append('ロスカットのみ')
+            if tier_range is not None:
+                condition_parts.append(f"ティア={tier_range[0]}-{tier_range[1]}")
+            st.caption(f"表示条件：{' ｜ '.join(condition_parts)}")
+            st.caption(f"表示件数：{len(filtered_df)} / {total_count}")
+
+            display_df = format_display_dataframe(filtered_df, visible_cols)
+            move_col_labels = [COLUMN_LABELS['move_vs_entry'], COLUMN_LABELS['low_move_vs_entry']]
+
+            styled = display_df.style
+            for move_col_label in move_col_labels:
+                if move_col_label in display_df.columns:
+                    styled = styled.map(
+                        lambda value: 'color: #1976D2' if str(value).startswith('+') else 'color: #D32F2F' if str(value).startswith('-') else '',
+                        subset=[move_col_label],
+                    )
+
+            numeric_move = pd.to_numeric(filtered_df.get('move_vs_entry'), errors='coerce').abs()
+            if numeric_move.notna().any():
+                threshold = numeric_move.quantile(0.95)
+                outlier_mask = numeric_move >= threshold
+                style_rows = pd.DataFrame('', index=display_df.index, columns=display_df.columns)
+                style_rows.loc[outlier_mask.values, :] = 'background-color: #FFF3CD'
+                styled = styled.apply(lambda _: style_rows, axis=None)
+
+            st.dataframe(styled, use_container_width=True, height=600)
 
     with tab3:
         st.subheader("統計情報")
