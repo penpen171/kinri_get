@@ -419,20 +419,34 @@ try:
             preset = st.selectbox('列プリセット', options=list(PRESET_COLUMNS.keys()), index=0, key='detail_preset')
             preset_cols = [c for c in PRESET_COLUMNS[preset] if c in detail_df.columns]
 
-            if 'visible_columns' not in st.session_state:
-                st.session_state.visible_columns = preset_cols
+            if 'visible_cols_draft' not in st.session_state:
+                st.session_state.visible_cols_draft = preset_cols
+            if 'visible_cols_committed' not in st.session_state:
+                st.session_state.visible_cols_committed = preset_cols
+            if 'detail_table_nonce' not in st.session_state:
+                st.session_state.detail_table_nonce = 0
+
             if st.session_state.get('last_preset') != preset:
-                st.session_state.visible_columns = preset_cols
+                st.session_state.visible_cols_draft = preset_cols
+                st.session_state.visible_cols_committed = preset_cols
                 st.session_state.last_preset = preset
+                st.session_state.detail_table_nonce += 1
 
             col_candidates = [c for c in COLUMN_LABELS.keys() if c in detail_df.columns]
-            visible_cols = st.multiselect(
+            st.multiselect(
                 '表示列トグル',
                 options=col_candidates,
-                default=st.session_state.visible_columns,
+                default=st.session_state.visible_cols_draft,
                 format_func=lambda c: COLUMN_LABELS.get(c, c),
-                key='visible_columns',
+                key='visible_cols_draft',
             )
+            if st.button('列変更を適用', key='apply_visible_cols'):
+                prev_table_key = f"detail_table_{st.session_state.detail_table_nonce}"
+                st.session_state.visible_cols_committed = list(st.session_state.visible_cols_draft)
+                st.session_state.detail_table_nonce += 1
+                st.session_state.pop(prev_table_key, None)
+                st.rerun()
+            visible_cols = [c for c in st.session_state.visible_cols_committed if c in col_candidates]
 
             st.markdown('#### フィルタ')
             filter_col1, filter_col2, filter_col3 = st.columns(3)
@@ -510,7 +524,12 @@ try:
                     style_rows.loc[outlier_mask.values, :] = 'background-color: #FFF3CD'
                     styled = styled.apply(lambda _: style_rows, axis=None)
 
-            st.dataframe(styled, use_container_width=True, height=600)
+            st.dataframe(
+                styled,
+                use_container_width=True,
+                height=600,
+                key=f"detail_table_{st.session_state.detail_table_nonce}",
+            )
 
     with tab3:
         st.subheader("統計情報")
