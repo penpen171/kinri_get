@@ -19,9 +19,6 @@ COLUMN_LABELS = {
     'reach_time': '到達時間',
     'entry': '建値',
     'target_price': '価格',
-    'low_reach_time': '最底値 到達時間',
-    'low_target_price': '最底値 価格',
-    'low_move_vs_entry': '最底値 値幅（建値差）',
     'skip_minutes': 'skip_minutes',
     'used_tier_index': 'used_tier_index',
     'used_mm_rate': 'used_mm_rate',
@@ -30,28 +27,14 @@ COLUMN_LABELS = {
 }
 
 PRESET_COLUMNS = {
-    '一覧': ['date', 'symbol', 'move_vs_entry', 'low_move_vs_entry', 'is_loss_cut', 'detail'],
-    '分析': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'low_move_vs_entry', 'low_reach_time', 'skip_minutes', 'weekday_jp', 'detail'],
-    '詳細': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'target_price', 'low_move_vs_entry', 'low_reach_time', 'low_target_price', 'used_tier_index', 'used_mm_rate', 'skip_minutes', 'detail'],
+    '一覧': ['date', 'symbol', 'move_vs_entry', 'is_loss_cut', 'detail'],
+    '分析': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'skip_minutes', 'weekday_jp', 'detail'],
+    '詳細': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'target_price', 'used_tier_index', 'used_mm_rate', 'skip_minutes', 'detail'],
 }
 
 st.set_page_config(page_title="ゴールド戦略シミュレータ", page_icon="💎", layout="wide")
 st.title("💎 ゴールド戦略シミュレータ")
 st.markdown("レバレッジ500倍×閉場前ポジション戦略の分析ツール")
-
-st.markdown(
-    """
-    <style>
-    div[data-testid="stVerticalBlock"] div[data-testid="stHorizontalBlock"] {
-        background-color: #f5f6f7;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        padding: 0.5rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 # サイドバー：パラメータ設定
 st.sidebar.header("⚙️ 設定")
@@ -216,20 +199,18 @@ def build_detail_view_dataframe(results_df, source_df):
     merged_df['is_loss_cut'] = merged_df.get('symbol', '').astype(str).str.contains('❌|🔵')
 
     merged_df['move_vs_entry'] = merged_df.apply(
-        lambda row: row.get('phase2_high') - row.get('entry')
-        if pd.notna(row.get('phase2_high')) and pd.notna(row.get('entry')) else pd.NA,
+        lambda row: first_available(row, ['phase2_high', 'phase2_low']) - row.get('entry')
+        if pd.notna(first_available(row, ['phase2_high', 'phase2_low'])) and pd.notna(row.get('entry')) else pd.NA,
         axis=1,
     )
-    merged_df['reach_time'] = merged_df.get('phase2_high_time')
-    merged_df['target_price'] = merged_df.get('phase2_high')
-
-    merged_df['low_move_vs_entry'] = merged_df.apply(
-        lambda row: row.get('phase2_low') - row.get('entry')
-        if pd.notna(row.get('phase2_low')) and pd.notna(row.get('entry')) else pd.NA,
+    merged_df['reach_time'] = merged_df.apply(
+        lambda row: first_available(row, ['phase2_high_time', 'phase2_low_time']),
         axis=1,
     )
-    merged_df['low_reach_time'] = merged_df.get('phase2_low_time')
-    merged_df['low_target_price'] = merged_df.get('phase2_low')
+    merged_df['target_price'] = merged_df.apply(
+        lambda row: first_available(row, ['phase2_high', 'phase2_low']),
+        axis=1,
+    )
     merged_df['skip_minutes'] = pd.to_numeric(merged_df.get('skip_minutes'), errors='coerce').fillna(0)
 
     return merged_df
@@ -243,11 +224,11 @@ def format_display_dataframe(df, selected_cols):
         label = COLUMN_LABELS.get(col, col)
         if col == 'date':
             display_df[label] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d').fillna('-')
-        elif col in ('move_vs_entry', 'low_move_vs_entry'):
+        elif col == 'move_vs_entry':
             display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"{v:+.2f}")
-        elif col in ('entry', 'target_price', 'low_target_price'):
+        elif col in ('entry', 'target_price'):
             display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"${v:,.2f}")
-        elif col in ('reach_time', 'low_reach_time'):
+        elif col == 'reach_time':
             display_df[label] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%H:%M').fillna('-')
         elif col == 'used_mm_rate':
             display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"{v * 100:.3f}%")
@@ -438,19 +419,17 @@ try:
             preset = st.selectbox('列プリセット', options=list(PRESET_COLUMNS.keys()), index=0, key='detail_preset')
             preset_cols = [c for c in PRESET_COLUMNS[preset] if c in detail_df.columns]
 
-            if 'last_preset' not in st.session_state:
-                st.session_state.last_preset = preset
-            if st.session_state.get('last_preset') != preset:
-                st.session_state.last_preset = preset
-                st.session_state.pop('visible_columns', None)
-                st.rerun()
             if 'visible_columns' not in st.session_state:
                 st.session_state.visible_columns = preset_cols
+            if st.session_state.get('last_preset') != preset:
+                st.session_state.visible_columns = preset_cols
+                st.session_state.last_preset = preset
 
             col_candidates = [c for c in COLUMN_LABELS.keys() if c in detail_df.columns]
             visible_cols = st.multiselect(
                 '表示列トグル',
                 options=col_candidates,
+                default=st.session_state.visible_columns,
                 format_func=lambda c: COLUMN_LABELS.get(c, c),
                 key='visible_columns',
             )
@@ -468,7 +447,13 @@ try:
             skip_only = filter_col3.checkbox('skip_minutes > 0 のみ')
             loss_only = filter_col3.checkbox('ロスカット発生日のみ')
 
-            tier_values = pd.to_numeric(detail_df.get('used_tier_index'), errors='coerce').dropna()
+            # --- used_tier_index の値を安全に取り出す（Series前提にする） ---
+            if isinstance(detail_df, pd.DataFrame) and ("used_tier_index" in detail_df.columns):
+                tier_series = pd.to_numeric(detail_df["used_tier_index"], errors="coerce")
+            else:
+                tier_series = pd.Series([], dtype="float64")
+
+            tier_values = tier_series.dropna()
             tier_range = None
             if not tier_values.empty:
                 tier_min = int(tier_values.min())
@@ -507,23 +492,22 @@ try:
             st.caption(f"表示件数：{len(filtered_df)} / {total_count}")
 
             display_df = format_display_dataframe(filtered_df, visible_cols)
-            move_col_labels = [COLUMN_LABELS['move_vs_entry'], COLUMN_LABELS['low_move_vs_entry']]
+            move_col_label = COLUMN_LABELS['move_vs_entry']
 
             styled = display_df.style
-            for move_col_label in move_col_labels:
-                if move_col_label in display_df.columns:
-                    styled = styled.map(
-                        lambda value: 'color: #1976D2' if str(value).startswith('+') else 'color: #D32F2F' if str(value).startswith('-') else '',
-                        subset=[move_col_label],
-                    )
+            if move_col_label in display_df.columns:
+                styled = styled.map(
+                    lambda value: 'color: #1976D2' if str(value).startswith('+') else 'color: #D32F2F' if str(value).startswith('-') else '',
+                    subset=[move_col_label],
+                )
 
-            numeric_move = pd.to_numeric(filtered_df.get('move_vs_entry'), errors='coerce').abs()
-            if numeric_move.notna().any():
-                threshold = numeric_move.quantile(0.95)
-                outlier_mask = numeric_move >= threshold
-                style_rows = pd.DataFrame('', index=display_df.index, columns=display_df.columns)
-                style_rows.loc[outlier_mask.values, :] = 'background-color: #FFF3CD'
-                styled = styled.apply(lambda _: style_rows, axis=None)
+                numeric_move = pd.to_numeric(filtered_df.get('move_vs_entry'), errors='coerce').abs()
+                if numeric_move.notna().any():
+                    threshold = numeric_move.quantile(0.95)
+                    outlier_mask = numeric_move >= threshold
+                    style_rows = pd.DataFrame('', index=display_df.index, columns=display_df.columns)
+                    style_rows.loc[outlier_mask.values, :] = 'background-color: #FFF3CD'
+                    styled = styled.apply(lambda _: style_rows, axis=None)
 
             st.dataframe(styled, use_container_width=True, height=600)
 
