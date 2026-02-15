@@ -1,0 +1,413 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Tuple
+
+import pandas as pd
+import streamlit as st
+
+from core.logic import (
+    DEFAULT_JUDGMENT_HOURS,
+    DEFAULT_THRESHOLD_MIN,
+    calculate_statistics,
+    judge_all,
+)
+
+APP_DIR = Path(__file__).resolve().parent
+
+WEEKDAY_ORDER = ["月", "火", "水", "木", "金", "土", "日"]
+WEEKDAY_MAP = dict(enumerate(WEEKDAY_ORDER))
+
+# =========================
+# 表示ラベル
+# =========================
+COLUMN_LABELS = {
+    "date": "日付",
+    "weekday_jp": "曜日",
+    "symbol": "シンボル",
+    "entry": "建値",
+
+    # 最高値
+    "reach_time": "最高値 到達時間",
+    "target_price": "最高値 価格",
+    "move_vs_entry": "最高値 値幅（=最高 - 建値）",
+
+    # 最底値
+    "low_reach_time": "最底値 到達時間",
+    "low_target_price": "最底値 価格",
+    "low_move_vs_entry": "最底値 値幅（=最底 - 建値）",
+}
+
+PRESET_COLUMNS = {
+    "標準（最高/最底あり）": [
+        "date",
+        "weekday_jp",
+        "symbol",
+        "entry",
+        "reach_time",
+        "target_price",
+        "move_vs_entry",
+        "low_reach_time",
+        "low_target_price",
+        "low_move_vs_entry",
+    ],
+    "最高値のみ": [
+        "date",
+        "weekday_jp",
+        "symbol",
+        "entry",
+        "reach_time",
+        "target_price",
+        "move_vs_entry",
+    ],
+    "最底値のみ": [
+        "date",
+        "weekday_jp",
+        "symbol",
+        "entry",
+        "low_reach_time",
+        "low_target_price",
+        "low_move_vs_entry",
+    ],
+}
+
+MOVE_COLUMNS = ["move_vs_entry", "low_move_vs_entry"]
+
+
+# =========================
+# Utility
+# =========================
+def first_available(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def find_parquet_files() -> tuple[list[Path], list[Path]]:
+    """
+    daily_aggregates_t*_j*.parquet を探す候補ディレクトリを複数用意して探索する。
+    （app.py の置き場所が変わっても動くようにする）
+    """
+    candidates = [
+        APP_DIR,  # 例: repo root
+        APP_DIR / "diamond_hand_simulator",
+        APP_DIR / "data",
+        APP_DIR / "data" / "derived",
+        APP_DIR / "diamond_hand_simulator" / "data",
+        APP_DIR / "diamond_hand_simulator" / "data" / "derived",
+    ]
+
+    # 既存のみ + 重複排除
+    seen = set()
+    dirs: list[Path] = []
+    for d in candidates:
+        d = d.resolve()
+        if d.exists() and d.is_dir() and str(d) not in seen:
+            seen.add(str(d))
+            dirs.append(d)
+
+    files: list[Path] = []
+    for d in dirs:
+        files.extend(sorted(d.glob("daily_aggregates_t*_j*.parquet")))
+
+    # 念のため重複排除
+    uniq = []
+    seen_f = set()
+    for f in files:
+        fp = str(f.resolve())
+        if fp not in seen_f:
+            seen_f.add(fp)
+            uniq.append(f)
+    return dirs, uniq
+
+
+def load_data() -> tuple[pd.DataFrame, list[Path], list[Path]]:
+    """
+    parquet を見つけたら全部読み込んで結合する。
+    戻り値: (df, searched_dirs, used_files)
+    """
+    searched_dirs, paths = find_parquet_files()
+    if not paths:
+        return pd.DataFrame(), searched_dirs, []
+
+    dfs: list[pd.DataFrame] = []
+    for p in paths:
+        try:
+            dfs.append(pd.read_parquet(p))
+        except Exception:
+            # 1ファイル壊れてても全体は落とさない
+            continue
+
+    if not dfs:
+        return pd.DataFrame(), searched_dirs, []
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    # 型調整（存在しない列はスキップ）
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+
+    for col in ["reach_time", "low_reach_time"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    return df, searched_dirs, paths
+
+
+def build_detail_view_dataframe(df_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    low_* を含む詳細表示用DFを作る（列が無くても落ちない）。
+    """
+    if df_raw is None or df_raw.empty:
+        return pd.DataFrame()
+
+    df = df_raw.copy()
+
+    # weekday
+    if "date" in df.columns:
+        dt = pd.to_datetime(df["date"], errors="coerce")
+        df["weekday_jp"] = dt.dt.weekday.map(WEEKDAY_MAP)
+    elif "weekday_jp" not in df.columns:
+        df["weekday_jp"] = None
+
+    # 列名ゆれ吸収（最高値）
+    tp = first_available(df, ["target_price", "high_target_price", "max_target_price", "high_price", "max_price"])
+    rt = first_available(df, ["reach_time", "high_reach_time", "max_reach_time", "high_time", "max_time"])
+    if tp and tp != "target_price":
+        df["target_price"] = df[tp]
+    if rt and rt != "reach_time":
+        df["reach_time"] = df[rt]
+
+    # 列名ゆれ吸収（最底値）
+    ltp = first_available(df, ["low_target_price", "min_target_price", "low_price", "min_price"])
+    lrt = first_available(df, ["low_reach_time", "min_reach_time", "low_time", "min_time"])
+    if ltp and ltp != "low_target_price":
+        df["low_target_price"] = df[ltp]
+    if lrt and lrt != "low_reach_time":
+        df["low_reach_time"] = df[lrt]
+
+    # 値幅（最高値）
+    if "entry" in df.columns and "target_price" in df.columns:
+        df["move_vs_entry"] = pd.to_numeric(df["target_price"], errors="coerce") - pd.to_numeric(df["entry"], errors="coerce")
+    elif "move_vs_entry" not in df.columns:
+        df["move_vs_entry"] = pd.NA
+
+    # 値幅（最底値）
+    if "entry" in df.columns and "low_target_price" in df.columns:
+        df["low_move_vs_entry"] = pd.to_numeric(df["low_target_price"], errors="coerce") - pd.to_numeric(df["entry"], errors="coerce")
+    elif "low_move_vs_entry" not in df.columns:
+        df["low_move_vs_entry"] = pd.NA
+
+    return df
+
+
+def style_move_columns(styler: Any, cols: list[str]):
+    """
+    値幅列を +青 / -赤 にする（pandas差分で map が無い場合は applymap にフォールバック）
+    """
+    def colorize(v):
+        try:
+            if pd.isna(v):
+                return ""
+            v = float(v)
+        except Exception:
+            return ""
+        if v > 0:
+            return "color: #1f77b4;"
+        if v < 0:
+            return "color: #d62728;"
+        return ""
+
+    for c in cols:
+        if c in styler.data.columns:
+            if hasattr(styler, "map"):
+                styler = styler.map(colorize, subset=[c])
+            else:
+                styler = styler.applymap(colorize, subset=[c])
+    return styler
+
+
+def format_display_dataframe(df: pd.DataFrame, visible_columns: list[str]) -> Tuple[pd.DataFrame, Any]:
+    if df is None or df.empty:
+        empty = pd.DataFrame(columns=[COLUMN_LABELS.get(c, c) for c in visible_columns])
+        return empty, empty.style
+
+    cols = [c for c in visible_columns if c in df.columns]
+    if not cols:
+        cols = [c for c in df.columns if c in COLUMN_LABELS] or list(df.columns)
+
+    view = df[cols].copy()
+
+    # 時刻は HH:MM:SS に（見やすく）
+    for tcol in ["reach_time", "low_reach_time"]:
+        if tcol in view.columns:
+            s = pd.to_datetime(view[tcol], errors="coerce")
+            view[tcol] = s.dt.strftime("%H:%M:%S")
+
+    # 数値化
+    for ncol in ["entry", "target_price", "low_target_price", "move_vs_entry", "low_move_vs_entry"]:
+        if ncol in view.columns:
+            view[ncol] = pd.to_numeric(view[ncol], errors="coerce")
+
+    # ラベル変換
+    view = view.rename(columns={c: COLUMN_LABELS.get(c, c) for c in view.columns})
+
+    styler = view.style
+
+    # 値幅色付け（ラベル名で）
+    move_label_cols = [COLUMN_LABELS.get(c, c) for c in MOVE_COLUMNS]
+    styler = style_move_columns(styler, move_label_cols)
+
+    # 表示フォーマット
+    fmt = {}
+    for c in ["建値", "最高値 価格", "最底値 価格"]:
+        if c in view.columns:
+            fmt[c] = "{:,.2f}"
+    for c in ["最高値 値幅（=最高 - 建値）", "最底値 値幅（=最底 - 建値）"]:
+        if c in view.columns:
+            fmt[c] = "{:+,.2f}"
+    if fmt:
+        styler = styler.format(fmt, na_rep="")
+
+    return view, styler
+
+
+def init_visible_columns_state(all_columns: list[str]) -> None:
+    """
+    visible_columns の初回初期化（multiselect に default を渡さない）
+    """
+    if "visible_columns" not in st.session_state:
+        base = PRESET_COLUMNS["標準（最高/最底あり）"].copy()
+        st.session_state["visible_columns"] = [c for c in base if c in all_columns] or all_columns[:8]
+
+
+def apply_preset(preset_name: str, all_columns: list[str]) -> None:
+    preset_cols = [c for c in PRESET_COLUMNS.get(preset_name, []) if c in all_columns]
+    if not preset_cols:
+        preset_cols = all_columns[:8]
+    st.session_state["visible_columns"] = preset_cols
+    st.rerun()
+
+
+# =========================
+# UI
+# =========================
+def main() -> None:
+    st.set_page_config(page_title="diamond_hand_simulator", layout="wide")
+
+    # フィルタUI背景をニュートラル（薄グレー）
+    st.markdown(
+        """
+        <style>
+          section[data-testid="stSidebar"] { background: #f5f6f7; }
+          .filter-card {
+            background: #f5f6f7;
+            border: 1px solid #e6e8eb;
+            border-radius: 12px;
+            padding: 12px;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.title("Diamond Hand Simulator")
+
+    df_raw, searched_dirs, used_files = load_data()
+    df_detail = build_detail_view_dataframe(df_raw)
+
+    if df_detail.empty:
+        st.warning("データがありません（parquetが見つからない/読めない）")
+        with st.expander("探索した場所（確認用）", expanded=True):
+            st.write([str(d) for d in searched_dirs])
+            st.write("見つかったファイル数:", len(used_files))
+            if used_files:
+                st.write([str(p) for p in used_files[:10]])
+        st.stop()
+
+    # --- Sidebar ---
+    with st.sidebar:
+        st.markdown('<div class="filter-card">', unsafe_allow_html=True)
+        st.subheader("フィルタ / 表示設定")
+
+        # used_tier_index 安全版
+        tier_col = first_available(df_detail, ["used_tier_index", "tier_index", "tier"])
+        if tier_col is None:
+            st.info("used_tier_index 列が無いので、tier フィルタは無効です。")
+            tier_value = None
+        else:
+            s = pd.to_numeric(df_detail[tier_col], errors="coerce").dropna()
+            if s.empty:
+                st.info("tier 列の値が空なので、tier フィルタは無効です。")
+                tier_value = None
+            else:
+                tier_value = st.slider("used_tier_index", int(s.min()), int(s.max()), int(s.min()))
+
+        # 日付フィルタ
+        if "date" in df_detail.columns:
+            dates = pd.to_datetime(df_detail["date"], errors="coerce").dropna()
+            if not dates.empty:
+                dmin = dates.min().date()
+                dmax = dates.max().date()
+                date_range = st.date_input("日付範囲", value=(dmin, dmax), min_value=dmin, max_value=dmax)
+            else:
+                date_range = None
+        else:
+            date_range = None
+
+        # シンボルフィルタ
+        symbol_col = "symbol" if "symbol" in df_detail.columns else None
+        if symbol_col:
+            symbols = sorted([x for x in df_detail[symbol_col].dropna().unique().tolist() if str(x).strip()])
+            selected_symbols = st.multiselect("シンボル", options=symbols, default=[])
+        else:
+            selected_symbols = []
+
+        st.divider()
+
+        all_columns = list(df_detail.columns)
+        init_visible_columns_state(all_columns)
+
+        preset_names = list(PRESET_COLUMNS.keys())
+        preset = st.selectbox("表示列プリセット", options=preset_names, index=0)
+        if st.button("プリセットを適用", use_container_width=True):
+            apply_preset(preset, all_columns)
+
+        # ★重要：key を使う場合は session_state に代入しない
+        st.multiselect("表示する列", options=all_columns, key="visible_columns")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- フィルタ適用 ---
+    df_view = df_detail.copy()
+
+    if tier_value is not None and tier_col is not None:
+        df_view = df_view[pd.to_numeric(df_view[tier_col], errors="coerce") == tier_value]
+
+    if date_range and isinstance(date_range, tuple) and len(date_range) == 2 and "date" in df_view.columns:
+        start_d, end_d = date_range
+        d = pd.to_datetime(df_view["date"], errors="coerce").dt.date
+        df_view = df_view[(d >= start_d) & (d <= end_d)]
+
+    if selected_symbols and symbol_col:
+        df_view = df_view[df_view[symbol_col].isin(selected_symbols)]
+
+    # --- 統計（既存ロジックが合えば表示） ---
+    with st.expander("統計（既存ロジック）", expanded=False):
+        try:
+            judged = judge_all(df_view, threshold_min=DEFAULT_THRESHOLD_MIN, judgment_hours=DEFAULT_JUDGMENT_HOURS)
+            stats = calculate_statistics(judged)
+            st.write(stats)
+        except Exception as e:
+            st.info(f"統計はこのデータ形状では計算できませんでした（表示は継続）。\n\n{e}")
+
+    # --- 詳細表示 ---
+    st.subheader("詳細リスト")
+    visible_cols = st.session_state.get("visible_columns", [])
+    view_df, styler = format_display_dataframe(df_view, visible_cols)
+    st.dataframe(styler, use_container_width=True, hide_index=True)
+
+
+if __name__ == "__main__":
+    main()
