@@ -425,27 +425,41 @@ try:
                 st.session_state.visible_cols_committed = preset_cols
             if 'detail_table_nonce' not in st.session_state:
                 st.session_state.detail_table_nonce = 0
+            if 'detail_table_last_key' not in st.session_state:
+                st.session_state.detail_table_last_key = None
 
             if st.session_state.get('last_preset') != preset:
                 st.session_state.visible_cols_draft = preset_cols
                 st.session_state.visible_cols_committed = preset_cols
                 st.session_state.last_preset = preset
+                prev_table_key = st.session_state.detail_table_last_key
                 st.session_state.detail_table_nonce += 1
+                if prev_table_key is not None:
+                    st.session_state.pop(prev_table_key, None)
 
             col_candidates = [c for c in COLUMN_LABELS.keys() if c in detail_df.columns]
+            draft_cols = [c for c in st.session_state.visible_cols_draft if c in col_candidates]
+            committed_cols = [c for c in st.session_state.visible_cols_committed if c in col_candidates]
+            if draft_cols != st.session_state.visible_cols_draft:
+                st.session_state.visible_cols_draft = draft_cols
+            if committed_cols != st.session_state.visible_cols_committed:
+                st.session_state.visible_cols_committed = committed_cols
+
             st.multiselect(
                 '表示列トグル',
                 options=col_candidates,
-                default=st.session_state.visible_cols_draft,
                 format_func=lambda c: COLUMN_LABELS.get(c, c),
                 key='visible_cols_draft',
             )
             if st.button('列変更を適用', key='apply_visible_cols'):
-                prev_table_key = f"detail_table_{st.session_state.detail_table_nonce}"
-                st.session_state.visible_cols_committed = list(st.session_state.visible_cols_draft)
-                st.session_state.detail_table_nonce += 1
-                st.session_state.pop(prev_table_key, None)
-                st.rerun()
+                next_committed = [c for c in st.session_state.visible_cols_draft if c in col_candidates]
+                if next_committed != st.session_state.visible_cols_committed:
+                    prev_table_key = st.session_state.detail_table_last_key
+                    st.session_state.visible_cols_committed = next_committed
+                    st.session_state.detail_table_nonce += 1
+                    if prev_table_key is not None:
+                        st.session_state.pop(prev_table_key, None)
+                    st.rerun()
             visible_cols = [c for c in st.session_state.visible_cols_committed if c in col_candidates]
 
             st.markdown('#### フィルタ')
@@ -524,11 +538,13 @@ try:
                     style_rows.loc[outlier_mask.values, :] = 'background-color: #FFF3CD'
                     styled = styled.apply(lambda _: style_rows, axis=None)
 
+            detail_table_key = f"detail_table_{st.session_state.detail_table_nonce}"
+            st.session_state.detail_table_last_key = detail_table_key
             st.dataframe(
                 styled,
                 use_container_width=True,
                 height=600,
-                key=f"detail_table_{st.session_state.detail_table_nonce}",
+                key=detail_table_key,
             )
 
     with tab3:
