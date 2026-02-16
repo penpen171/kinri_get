@@ -185,7 +185,9 @@ class TierMMModel:
 
     def get_mm_rate(self, leverage, position_margin, entry_price=None, qty=None):
         notional = self._infer_notional(leverage, position_margin, entry_price, qty)
-        return self._resolve_mm_rate(notional)
+        mm_rate, _, _, _ = self._resolve_mm_rate(notional)
+        return mm_rate
+
 
     def get_info(self):
         return {
