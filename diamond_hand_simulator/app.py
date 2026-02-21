@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import calendar
 from datetime import datetime
@@ -7,30 +7,6 @@ from core.liquidation import create_liquidation_model
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
-
-WEEKDAY_ORDER = ['月', '火', '水', '木', '金', '土', '日']
-WEEKDAY_MAP = dict(enumerate(WEEKDAY_ORDER))
-
-COLUMN_LABELS = {
-    'date': '日付',
-    'weekday_jp': '曜日',
-    'symbol': 'シンボル',
-    'move_vs_entry': '値幅（建値差）',
-    'reach_time': '到達時間',
-    'entry': '建値',
-    'target_price': '価格',
-    'skip_minutes': 'skip_minutes',
-    'used_tier_index': 'used_tier_index',
-    'used_mm_rate': 'used_mm_rate',
-    'detail': '詳細',
-    'is_loss_cut': 'ロスカ有無',
-}
-
-PRESET_COLUMNS = {
-    '一覧': ['date', 'symbol', 'move_vs_entry', 'is_loss_cut', 'detail'],
-    '分析': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'skip_minutes', 'weekday_jp', 'detail'],
-    '詳細': ['date', 'symbol', 'move_vs_entry', 'reach_time', 'target_price', 'used_tier_index', 'used_mm_rate', 'skip_minutes', 'detail'],
-}
 
 st.set_page_config(page_title="ゴールド戦略シミュレータ", page_icon="💎", layout="wide")
 st.title("💎 ゴールド戦略シミュレータ")
@@ -163,89 +139,6 @@ def _exchange_config_signature():
 def load_model(config_signature):
     _ = config_signature
     return create_liquidation_model()
-
-
-def derive_weekday_series(date_series):
-    date_parsed = pd.to_datetime(date_series, errors='coerce')
-    return date_parsed.dt.dayofweek.map(WEEKDAY_MAP)
-
-
-def first_available(row, columns):
-    for col in columns:
-        val = row.get(col)
-        if pd.notna(val):
-            return val
-    return pd.NA
-
-
-def build_detail_view_dataframe(results_df, source_df):
-    base_df = results_df.copy()
-    base_df['date'] = pd.to_datetime(base_df.get('date'), errors='coerce').dt.date
-
-    source_meta = source_df.copy()
-    source_meta['date'] = pd.to_datetime(source_meta.get('date'), errors='coerce').dt.date
-
-    optional_cols = [
-        'date', 'skip_minutes', 'used_tier_index', 'used_mm_rate',
-        'used_notional', 'used_tier_min_notional', 'used_tier_max_notional',
-    ]
-    available_meta_cols = [c for c in optional_cols if c in source_meta.columns]
-    if available_meta_cols:
-        source_meta = source_meta[available_meta_cols].drop_duplicates(subset=['date'])
-
-    merged_df = base_df.merge(source_meta, on='date', how='left', suffixes=('', '_src'))
-
-    merged_df['weekday_jp'] = derive_weekday_series(merged_df.get('date'))
-    merged_df['is_loss_cut'] = merged_df.get('symbol', '').astype(str).str.contains('❌|🔵')
-
-    merged_df['move_vs_entry'] = merged_df.apply(
-        lambda row: first_available(row, ['phase2_high', 'phase2_low']) - row.get('entry')
-        if pd.notna(first_available(row, ['phase2_high', 'phase2_low'])) and pd.notna(row.get('entry')) else pd.NA,
-        axis=1,
-    )
-    merged_df['reach_time'] = merged_df.apply(
-        lambda row: first_available(row, ['phase2_high_time', 'phase2_low_time']),
-        axis=1,
-    )
-    merged_df['target_price'] = merged_df.apply(
-        lambda row: first_available(row, ['phase2_high', 'phase2_low']),
-        axis=1,
-    )
-    merged_df['skip_minutes'] = pd.to_numeric(merged_df.get('skip_minutes'), errors='coerce').fillna(0)
-
-    return merged_df
-
-
-def format_display_dataframe(df, selected_cols):
-    display_df = pd.DataFrame()
-    for col in selected_cols:
-        if col not in df.columns:
-            continue
-        label = COLUMN_LABELS.get(col, col)
-        if col == 'date':
-            display_df[label] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d').fillna('-')
-        elif col == 'move_vs_entry':
-            display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"{v:+.2f}")
-        elif col in ('entry', 'target_price'):
-            display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"${v:,.2f}")
-        elif col == 'reach_time':
-            display_df[label] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%H:%M').fillna('-')
-        elif col == 'used_mm_rate':
-            display_df[label] = df[col].apply(lambda v: '-' if pd.isna(v) else f"{v * 100:.3f}%")
-        elif col == 'is_loss_cut':
-            display_df[label] = df[col].apply(lambda v: 'あり' if bool(v) else 'なし')
-        elif col == 'weekday_jp':
-            display_df[label] = df[col].fillna('-')
-        elif col == 'detail':
-            display_df[label] = df.apply(
-                lambda row: f"{row.get('detail', '')} | open bar skipped: +{int(row.get('skip_minutes', 0))}min"
-                if row.get('skip_minutes', 0) > 0 and 'open bar skipped' not in str(row.get('detail', ''))
-                else row.get('detail', ''),
-                axis=1,
-            )
-        else:
-            display_df[label] = df[col]
-    return display_df
 
 try:
     # 選択された判定期間に応じたファイルを読み込む
@@ -413,123 +306,272 @@ try:
         if len(results) == 0:
             st.warning(f"データがありません。")
         else:
-            detail_df = build_detail_view_dataframe(pd.DataFrame(results), df)
-            total_count = len(detail_df)
+            detail_df = pd.DataFrame(results)
 
-            preset = st.selectbox('列プリセット', options=list(PRESET_COLUMNS.keys()), index=0, key='detail_preset')
-            preset_cols = [c for c in PRESET_COLUMNS[preset] if c in detail_df.columns]
+            weekday_map = {0: '月', 1: '火', 2: '水', 3: '木', 4: '金', 5: '土', 6: '日'}
+            weekday_order = ['月', '火', '水', '木', '金', '土', '日']
 
-            if 'visible_cols_draft' not in st.session_state:
-                st.session_state.visible_cols_draft = preset_cols
-            if 'visible_cols_committed' not in st.session_state:
-                st.session_state.visible_cols_committed = preset_cols
-            if 'detail_table_nonce' not in st.session_state:
-                st.session_state.detail_table_nonce = 0
+            def _series(name, default=None):
+                if default is None:
+                    default = pd.Series([pd.NA] * len(detail_df), index=detail_df.index)
+                return detail_df.get(name, default)
 
-            if st.session_state.get('last_preset') != preset:
-                st.session_state.visible_cols_draft = preset_cols
-                st.session_state.visible_cols_committed = preset_cols
-                st.session_state.last_preset = preset
-                st.session_state.detail_table_nonce += 1
+            raw_df = pd.DataFrame({
+                '日付': pd.to_datetime(_series('date'), errors='coerce'),
+                'シンボル': _series('symbol', pd.Series(['-'] * len(detail_df), index=detail_df.index)).fillna('-').astype(str),
+                '建値_raw': pd.to_numeric(_series('entry'), errors='coerce'),
+                '最高値時刻_raw': pd.to_datetime(_series('phase2_high_time'), errors='coerce'),
+                '最高値価格_raw': pd.to_numeric(_series('phase2_high'), errors='coerce'),
+                '最底値時刻_raw': pd.to_datetime(_series('phase2_low_time'), errors='coerce'),
+                '最底値価格_raw': pd.to_numeric(_series('phase2_low'), errors='coerce'),
+                '上方向値幅_raw': pd.to_numeric(_series('move_vs_entry'), errors='coerce'),
+                '下方向値幅_raw': pd.to_numeric(_series('low_move_vs_entry'), errors='coerce'),
+                'skip_minutes_raw': pd.to_numeric(_series('skip_minutes', pd.Series([0] * len(detail_df), index=detail_df.index)), errors='coerce').fillna(0),
+                'used_tier_index_raw': pd.to_numeric(_series('used_tier_index'), errors='coerce'),
+                'detail_raw': _series('detail', pd.Series([''] * len(detail_df), index=detail_df.index)).fillna('').astype(str),
+            })
 
-            col_candidates = [c for c in COLUMN_LABELS.keys() if c in detail_df.columns]
-            st.multiselect(
-                '表示列トグル',
-                options=col_candidates,
-                default=st.session_state.visible_cols_draft,
-                format_func=lambda c: COLUMN_LABELS.get(c, c),
-                key='visible_cols_draft',
-            )
-            if st.button('列変更を適用', key='apply_visible_cols'):
-                prev_table_key = f"detail_table_{st.session_state.detail_table_nonce}"
-                st.session_state.visible_cols_committed = list(st.session_state.visible_cols_draft)
-                st.session_state.detail_table_nonce += 1
-                st.session_state.pop(prev_table_key, None)
-                st.rerun()
-            visible_cols = [c for c in st.session_state.visible_cols_committed if c in col_candidates]
+            raw_df['曜日'] = raw_df['日付'].dt.weekday.map(weekday_map)
+            liquidated_flag = _series('liquidated', pd.Series([False] * len(detail_df), index=detail_df.index)).fillna(False).astype(bool)
+            raw_df['ロスカット'] = liquidated_flag | raw_df['シンボル'].str.contains('❌', na=False)
+            raw_df['最高値建値差_raw'] = raw_df['最高値価格_raw'] - raw_df['建値_raw']
+            raw_df['最底値建値差_raw'] = raw_df['最底値価格_raw'] - raw_df['建値_raw']
 
-            st.markdown('#### フィルタ')
+            # --- フィルタ ---
+            st.markdown("#### フィルタ")
             filter_col1, filter_col2, filter_col3 = st.columns(3)
 
-            symbols = sorted(detail_df.get('symbol', pd.Series(dtype='object')).dropna().unique().tolist())
-            selected_symbols = filter_col1.multiselect('シンボル', options=symbols, default=symbols)
-
-            weekday_series = detail_df.get('weekday_jp', pd.Series(dtype='object')).dropna()
-            available_weekdays = [wd for wd in WEEKDAY_ORDER if wd in weekday_series.unique().tolist()]
-            selected_weekdays = filter_col2.multiselect('曜日', options=WEEKDAY_ORDER, default=available_weekdays)
-
-            skip_only = filter_col3.checkbox('skip_minutes > 0 のみ')
-            loss_only = filter_col3.checkbox('ロスカット発生日のみ')
-
-            # --- used_tier_index の値を安全に取り出す（Series前提にする） ---
-            if isinstance(detail_df, pd.DataFrame) and ("used_tier_index" in detail_df.columns):
-                tier_series = pd.to_numeric(detail_df["used_tier_index"], errors="coerce")
-            else:
-                tier_series = pd.Series([], dtype="float64")
-
-            tier_values = tier_series.dropna()
-
-            tier_range = None
-            if not tier_values.empty:
-                tier_min = int(tier_values.min())
-                tier_max = int(tier_values.max())
-                tier_range = st.slider('used_tier_index 範囲', min_value=tier_min, max_value=tier_max, value=(tier_min, tier_max))
-
-            filtered_df = detail_df.copy()
-            if selected_symbols:
-                filtered_df = filtered_df[filtered_df.get('symbol').isin(selected_symbols)]
-            if selected_weekdays:
-                filtered_df = filtered_df[filtered_df.get('weekday_jp').isin(selected_weekdays)]
-            if skip_only:
-                filtered_df = filtered_df[pd.to_numeric(filtered_df.get('skip_minutes'), errors='coerce').fillna(0) > 0]
-            if loss_only:
-                filtered_df = filtered_df[filtered_df.get('is_loss_cut', False)]
-            if tier_range is not None:
-                tier_col = pd.to_numeric(filtered_df.get('used_tier_index'), errors='coerce')
-                filtered_df = filtered_df[tier_col.between(tier_range[0], tier_range[1], inclusive='both')]
-
-            sort_options = [c for c in col_candidates if c != 'detail']
-            sort_key = st.selectbox('ソート列', options=sort_options, format_func=lambda c: COLUMN_LABELS.get(c, c), index=0)
-            sort_asc = st.checkbox('昇順', value=False)
-            filtered_df = filtered_df.sort_values(by=sort_key, ascending=sort_asc, na_position='last')
-
-            condition_parts = [
-                f"シンボル={','.join(selected_symbols) if selected_symbols else 'なし'}",
-                f"曜日={','.join(selected_weekdays) if selected_weekdays else 'なし'}",
-            ]
-            if skip_only:
-                condition_parts.append('skipあり')
-            if loss_only:
-                condition_parts.append('ロスカットのみ')
-            if tier_range is not None:
-                condition_parts.append(f"ティア={tier_range[0]}-{tier_range[1]}")
-            st.caption(f"表示条件：{' ｜ '.join(condition_parts)}")
-            st.caption(f"表示件数：{len(filtered_df)} / {total_count}")
-
-            display_df = format_display_dataframe(filtered_df, visible_cols)
-            move_col_label = COLUMN_LABELS['move_vs_entry']
-
-            styled = display_df.style
-            if move_col_label in display_df.columns:
-                styled = styled.map(
-                    lambda value: 'color: #1976D2' if str(value).startswith('+') else 'color: #D32F2F' if str(value).startswith('-') else '',
-                    subset=[move_col_label],
+            symbol_options = sorted(raw_df['シンボル'].dropna().unique().tolist())
+            with filter_col1:
+                selected_symbols = st.multiselect(
+                    "シンボル",
+                    options=symbol_options,
+                    default=symbol_options,
+                    key="detail_filter_symbols",
                 )
 
-                numeric_move = pd.to_numeric(filtered_df.get('move_vs_entry'), errors='coerce').abs()
-                if numeric_move.notna().any():
-                    threshold = numeric_move.quantile(0.95)
-                    outlier_mask = numeric_move >= threshold
-                    style_rows = pd.DataFrame('', index=display_df.index, columns=display_df.columns)
-                    style_rows.loc[outlier_mask.values, :] = 'background-color: #FFF3CD'
-                    styled = styled.apply(lambda _: style_rows, axis=None)
+            weekday_options = [wd for wd in weekday_order if wd in raw_df['曜日'].dropna().unique().tolist()]
+            with filter_col2:
+                selected_weekdays = st.multiselect(
+                    "曜日",
+                    options=weekday_options,
+                    default=weekday_options,
+                    key="detail_filter_weekdays",
+                )
 
-            st.dataframe(
-                styled,
-                use_container_width=True,
-                height=600,
-                key=f"detail_table_{st.session_state.detail_table_nonce}",
+            tier_series = raw_df['used_tier_index_raw'].dropna()
+            if len(tier_series) > 0:
+                tier_min, tier_max = int(tier_series.min()), int(tier_series.max())
+            else:
+                tier_min, tier_max = 0, 0
+
+            with filter_col3:
+                tier_range = st.slider(
+                    "used_tier_index 範囲",
+                    min_value=tier_min,
+                    max_value=tier_max,
+                    value=(tier_min, tier_max),
+                    key="detail_filter_tier_range",
+                )
+
+            check_col1, check_col2 = st.columns(2)
+            with check_col1:
+                only_skip = st.checkbox("skip_minutes > 0 のみ", key="detail_filter_only_skip")
+            with check_col2:
+                only_liq = st.checkbox("ロスカット日のみ", key="detail_filter_only_liq")
+
+            filtered_df = raw_df.copy()
+            if selected_symbols:
+                filtered_df = filtered_df[filtered_df['シンボル'].isin(selected_symbols)]
+            else:
+                filtered_df = filtered_df.iloc[0:0]
+
+            if selected_weekdays:
+                filtered_df = filtered_df[filtered_df['曜日'].isin(selected_weekdays)]
+            else:
+                filtered_df = filtered_df.iloc[0:0]
+
+            filtered_df = filtered_df[
+                filtered_df['used_tier_index_raw'].fillna(tier_range[0]).between(tier_range[0], tier_range[1])
+            ]
+
+            if only_skip:
+                filtered_df = filtered_df[filtered_df['skip_minutes_raw'] > 0]
+
+            if only_liq:
+                filtered_df = filtered_df[filtered_df['ロスカット']]
+
+            # --- ソート ---
+            sort_columns = {
+                '日付': '日付',
+                '曜日': '曜日',
+                'シンボル': 'シンボル',
+                '建値': '建値_raw',
+                '最高値時刻': '最高値時刻_raw',
+                '最高値価格': '最高値価格_raw',
+                '最高値建値差': '最高値建値差_raw',
+                '最底値時刻': '最底値時刻_raw',
+                '最底値価格': '最底値価格_raw',
+                '最底値建値差': '最底値建値差_raw',
+                '上方向値幅': '上方向値幅_raw',
+                '下方向値幅': '下方向値幅_raw',
+                'skip_minutes': 'skip_minutes_raw',
+                'used_tier_index': 'used_tier_index_raw',
+                'ロスカット': 'ロスカット',
+                '詳細': 'detail_raw',
+            }
+            sort_col1, sort_col2 = st.columns([3, 1])
+            with sort_col1:
+                sort_label = st.selectbox(
+                    "ソート列（非表示列も選択可）",
+                    options=list(sort_columns.keys()),
+                    key="detail_sort_column",
+                )
+            with sort_col2:
+                sort_ascending = st.checkbox("昇順", value=False, key="detail_sort_ascending")
+
+            filtered_df = filtered_df.sort_values(
+                by=sort_columns[sort_label],
+                ascending=sort_ascending,
+                na_position='last',
             )
+
+            # --- 表示整形 ---
+            def format_price(value):
+                if pd.isna(value):
+                    return "-"
+                return f"${value:,.2f}"
+
+            def format_time(ts):
+                if pd.isna(ts):
+                    return "-"
+                return pd.to_datetime(ts).strftime('%H:%M')
+
+            def format_diff(value):
+                if pd.isna(value):
+                    return "-"
+                sign = '+' if value >= 0 else '-'
+                return f"{sign}{abs(value):,.2f}"
+
+            def format_move(value):
+                if pd.isna(value):
+                    return "-"
+                sign = '+' if value >= 0 else '-'
+                return f"{sign}{abs(value):,.2f}"
+
+            def append_skip_detail(detail, skip_minutes):
+                if pd.isna(skip_minutes) or skip_minutes <= 0:
+                    return detail
+                append_text = f"open bar skipped: +{int(skip_minutes)}min"
+                base_detail = detail if isinstance(detail, str) else ""
+                if append_text in base_detail:
+                    return base_detail
+                if base_detail:
+                    return f"{base_detail} | {append_text}"
+                return append_text
+
+            q_up = filtered_df['上方向値幅_raw'].abs().quantile(0.95) if len(filtered_df) else pd.NA
+            q_down = filtered_df['下方向値幅_raw'].abs().quantile(0.95) if len(filtered_df) else pd.NA
+            filtered_df['_is_outlier'] = (
+                filtered_df['上方向値幅_raw'].abs().ge(q_up).fillna(False)
+                | filtered_df['下方向値幅_raw'].abs().ge(q_down).fillna(False)
+            ) if len(filtered_df) else False
+
+            display_df = pd.DataFrame({
+                '日付': filtered_df['日付'].dt.strftime('%Y-%m-%d').fillna('-'),
+                '曜日': filtered_df['曜日'].fillna('-'),
+                'シンボル': filtered_df['シンボル'],
+                '建値': filtered_df['建値_raw'].apply(format_price),
+                '最高値時刻': filtered_df['最高値時刻_raw'].apply(format_time),
+                '最高値価格': filtered_df['最高値価格_raw'].apply(format_price),
+                '最高値建値差': filtered_df['最高値建値差_raw'].apply(format_diff),
+                '最底値時刻': filtered_df['最底値時刻_raw'].apply(format_time),
+                '最底値価格': filtered_df['最底値価格_raw'].apply(format_price),
+                '最底値建値差': filtered_df['最底値建値差_raw'].apply(format_diff),
+                '上方向値幅': filtered_df['上方向値幅_raw'].apply(format_move),
+                '下方向値幅': filtered_df['下方向値幅_raw'].apply(format_move),
+                'skip_minutes': filtered_df['skip_minutes_raw'].fillna(0).astype(int),
+                'used_tier_index': filtered_df['used_tier_index_raw'].apply(lambda x: '-' if pd.isna(x) else int(x)),
+                'ロスカット': filtered_df['ロスカット'].map({True: 'あり', False: '-'}),
+                '詳細': [
+                    append_skip_detail(d, s)
+                    for d, s in zip(filtered_df['detail_raw'], filtered_df['skip_minutes_raw'])
+                ],
+            })
+
+            st.markdown(
+                "**表示条件** "
+                f"シンボル: {', '.join(selected_symbols) if selected_symbols else '(未選択)'} / "
+                f"曜日: {', '.join(selected_weekdays) if selected_weekdays else '(未選択)'} / "
+                f"skip: {'ON' if only_skip else 'OFF'} / "
+                f"ロスカ: {'ON' if only_liq else 'OFF'} / "
+                f"ティア: {tier_range[0]} - {tier_range[1]}"
+            )
+            st.caption(f"表示件数: {len(display_df)} / {len(raw_df)}")
+
+            # 列プリセット / 表示トグル
+            all_display_columns = list(display_df.columns)
+            preset_map = {
+                '一覧': ['日付', '曜日', 'シンボル', '建値', '上方向値幅', '下方向値幅', 'ロスカット', '詳細'],
+                '分析': ['日付', '曜日', 'シンボル', '建値', '最高値時刻', '最高値価格', '最高値建値差', '最底値時刻', '最底値価格', '最底値建値差', '上方向値幅', '下方向値幅', 'skip_minutes', 'used_tier_index'],
+                '詳細': all_display_columns,
+            }
+
+            preset = st.radio(
+                "列プリセット",
+                options=list(preset_map.keys()),
+                horizontal=True,
+                key="detail_column_preset",
+            )
+
+            if "detail_table_nonce" not in st.session_state:
+                st.session_state["detail_table_nonce"] = 0
+
+            last_preset = st.session_state.get("detail_column_preset_last")
+            if last_preset != preset:
+                st.session_state.pop("visible_columns", None)
+                st.session_state["detail_table_nonce"] += 1
+                st.session_state["detail_column_preset_last"] = preset
+
+            if "visible_columns" not in st.session_state:
+                st.session_state["visible_columns"] = preset_map[preset]
+
+            st.multiselect(
+                "表示列トグル",
+                options=all_display_columns,
+                key="visible_columns",
+                help="列を個別に ON/OFF できます。非表示列でもソート可能です。",
+            )
+
+            visible_columns = [c for c in st.session_state.get("visible_columns", []) if c in all_display_columns]
+            if not visible_columns:
+                st.warning("表示列が0件です。列トグルから1つ以上選択してください。")
+            else:
+                visible_df = display_df[visible_columns].copy()
+
+                def color_move(val):
+                    if isinstance(val, str):
+                        if val.startswith('+'):
+                            return 'color: #0066cc;'
+                        if val.startswith('-'):
+                            return 'color: #cc0000;'
+                    return ''
+
+                outlier_index = filtered_df.index[filtered_df['_is_outlier']].tolist()
+
+                def highlight_row(row):
+                    if row.name in outlier_index:
+                        return ['background-color: #fff7d6;'] * len(row)
+                    return [''] * len(row)
+
+                styled_df = (
+                    visible_df.style
+                    .apply(highlight_row, axis=1)
+                    .applymap(color_move, subset=[c for c in ['上方向値幅', '下方向値幅'] if c in visible_df.columns])
+                )
+
+                nonce_key = f"detail_table_{st.session_state['detail_table_nonce']}"
+                st.dataframe(styled_df, use_container_width=True, height=600, key=nonce_key)
 
     with tab3:
         st.subheader("統計情報")
