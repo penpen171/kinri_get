@@ -49,51 +49,70 @@ additional_margin = st.sidebar.number_input(
 )
 
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 取引所設定")
-exchange = st.sidebar.selectbox("取引所", ["BingX"])
+with st.sidebar.expander("⚙️ 高度な設定", expanded=False):
+    st.markdown("### 📊 取引所設定")
+    exchange = st.selectbox("取引所", ["BingX"])
+
+    st.markdown("### ⏰ 判定設定")
+    st.info(f"開場後 **{DEFAULT_THRESHOLD_MIN}分** で判定（固定）")
 
 
-# 判定期間の選択
-st.sidebar.markdown("---")
-st.sidebar.markdown("### ⏰ 判定設定")
-st.sidebar.info(f"開場後 **{DEFAULT_THRESHOLD_MIN}分** で判定（固定）")
+    # 判定期間のプルダウン
+    judgment_options = {
+        "次の閉場まで": None,
+        "22時間後まで": 22,
+        "21時間後まで": 21,
+        "20時間後まで": 20,
+        "19時間後まで": 19,
+        "18時間後まで": 18,
+        "17時間後まで": 17,
+        "16時間後まで": 16,
+        "15時間後まで": 15,
+        "14時間後まで": 14,
+        "13時間後まで": 13,
+        "12時間後まで": 12,
+        "11時間後まで": 11,
+        "10時間後まで": 10,
+        "9時間後まで": 9,
+        "8時間後まで": 8,
+        "7時間後まで": 7,
+        "6時間後まで": 6,
+        "5時間後まで": 5,
+        "4時間後まで": 4,
+        "3時間後まで": 3,
+        "2時間後まで": 2,
+        "1時間後まで": 1,
+    }
 
+    judgment_period_label = st.selectbox(
+        "判定期間",
+        options=list(judgment_options.keys()),
+        index=0,
+        help="ポジション保有期間（この時間後の結果で判定）"
+    )
 
-# 判定期間のプルダウン
-judgment_options = {
-    "次の閉場まで": None,
-    "22時間後まで": 22,
-    "21時間後まで": 21,
-    "20時間後まで": 20,
-    "19時間後まで": 19,
-    "18時間後まで": 18,
-    "17時間後まで": 17,
-    "16時間後まで": 16,
-    "15時間後まで": 15,
-    "14時間後まで": 14,
-    "13時間後まで": 13,
-    "12時間後まで": 12,
-    "11時間後まで": 11,
-    "10時間後まで": 10,
-    "9時間後まで": 9,
-    "8時間後まで": 8,
-    "7時間後まで": 7,
-    "6時間後まで": 6,
-    "5時間後まで": 5,
-    "4時間後まで": 4,
-    "3時間後まで": 3,
-    "2時間後まで": 2,
-    "1時間後まで": 1,
-}
+    entry_mode = st.selectbox(
+        "建値の基準",
+        options=["終値（標準）", "高値（ロング厳格向け）", "底値（ショート厳格向け）"],
+        index=0,
+        help="表示・派生列・判定で利用する建値の基準を選択します。"
+    )
 
+    loss_cut_mode = st.radio(
+        "ロスカット基準",
+        options=["標準", "許容率を指定"],
+        index=0,
+        help="標準はモデル計算、許容率は建値からの下落率で判定します。"
+    )
 
-judgment_period_label = st.sidebar.selectbox(
-    "判定期間",
-    options=list(judgment_options.keys()),
-    index=0,
-    help="ポジション保有期間（この時間後の結果で判定）"
-)
+    loss_cut_tolerance_pct = st.number_input(
+        "ロスカ許容率（%）",
+        min_value=0.0,
+        max_value=100.0,
+        value=0.0,
+        step=0.1,
+        help="許容率を指定モードで利用されます。0% は建値割れ即ロスカです。"
+    )
 
 
 judgment_hours = judgment_options[judgment_period_label]
@@ -147,6 +166,50 @@ def _exchange_config_signature():
 def load_model(config_signature):
     _ = config_signature
     return create_liquidation_model()
+
+
+def safe_series(frame, name, default_value=pd.NA):
+    if name in frame.columns:
+        return frame[name]
+    return pd.Series([default_value] * len(frame), index=frame.index)
+
+
+def resolve_entry_series(frame, entry_mode_label):
+    base_entry = pd.to_numeric(safe_series(frame, 'entry'), errors='coerce')
+    phase2_high = pd.to_numeric(safe_series(frame, 'phase2_high'), errors='coerce')
+    phase2_low = pd.to_numeric(safe_series(frame, 'phase2_low'), errors='coerce')
+
+    if entry_mode_label == "高値（ロング厳格向け）":
+        return phase2_high.where(phase2_high.notna(), base_entry)
+    if entry_mode_label == "底値（ショート厳格向け）":
+        return phase2_low.where(phase2_low.notna(), base_entry)
+    return base_entry
+
+
+def build_ui_result_frame(results, entry_mode_label, loss_cut_mode_label, tolerance_pct):
+    frame = pd.DataFrame(results)
+    if len(frame) == 0:
+        return frame
+
+    frame['entry_ui'] = resolve_entry_series(frame, entry_mode_label)
+    frame['phase2_high_num'] = pd.to_numeric(safe_series(frame, 'phase2_high'), errors='coerce')
+    frame['phase2_low_num'] = pd.to_numeric(safe_series(frame, 'phase2_low'), errors='coerce')
+    frame['high_diff_ui'] = frame['phase2_high_num'] - frame['entry_ui']
+    frame['low_diff_ui'] = frame['phase2_low_num'] - frame['entry_ui']
+
+    symbol_series = safe_series(frame, 'symbol', '-').fillna('-').astype(str)
+    liquidated_series = safe_series(frame, 'liquidated', False).fillna(False).astype(bool)
+    default_loss_cut = liquidated_series | symbol_series.str.contains('❌', na=False)
+
+    if loss_cut_mode_label == "許容率を指定":
+        tolerance = max(0.0, min(100.0, float(tolerance_pct)))
+        threshold_price = frame['entry_ui'] * (1 - tolerance / 100.0)
+        threshold_hit = frame['phase2_low_num'] < threshold_price
+        frame['is_loss_cut_ui'] = default_loss_cut.where(frame['entry_ui'].isna() | frame['phase2_low_num'].isna(), threshold_hit)
+    else:
+        frame['is_loss_cut_ui'] = default_loss_cut
+
+    return frame
 
 
 try:
@@ -216,6 +279,18 @@ try:
             df_1min=df_1min
         )
 
+    ui_results_df = build_ui_result_frame(
+        results,
+        entry_mode_label=entry_mode,
+        loss_cut_mode_label=loss_cut_mode,
+        tolerance_pct=loss_cut_tolerance_pct,
+    )
+
+    if len(ui_results_df) > 0:
+        loss_cut_count_ui = int(ui_results_df['is_loss_cut_ui'].fillna(False).sum())
+    else:
+        loss_cut_count_ui = 0
+
     stats = calculate_statistics(results)
 
     # 統計情報を表示
@@ -229,7 +304,7 @@ try:
     with col4:
         st.metric("🟠 マイナス継続", stats['warning_count'])
     with col5:
-        st.metric("❌ ロスカット", stats['loss_count'])
+        st.metric("❌ ロスカット", loss_cut_count_ui)
 
     # タブで表示切替
     tab1, tab2, tab3 = st.tabs(["📅 カレンダー表示", "📊 詳細リスト", "📈 統計"])
@@ -306,7 +381,7 @@ try:
         if len(results) == 0:
             st.warning(f"データがありません。")
         else:
-            detail_df = pd.DataFrame(results)
+            detail_df = ui_results_df.copy()
 
             weekday_map = {0: '月', 1: '火', 2: '水', 3: '木', 4: '金', 5: '土', 6: '日'}
             weekday_order = ['月', '火', '水', '木', '金', '土', '日']
@@ -319,7 +394,7 @@ try:
             raw_df = pd.DataFrame({
                 '日付': pd.to_datetime(_series('date'), errors='coerce'),
                 'シンボル': _series('symbol', pd.Series(['-'] * len(detail_df), index=detail_df.index)).fillna('-').astype(str),
-                '建値_raw': pd.to_numeric(_series('entry'), errors='coerce'),
+                '建値_raw': pd.to_numeric(_series('entry_ui'), errors='coerce'),
                 '最高値時刻_raw': pd.to_datetime(_series('phase2_high_time'), errors='coerce'),
                 '最高値価格_raw': pd.to_numeric(_series('phase2_high'), errors='coerce'),
                 '最底値時刻_raw': pd.to_datetime(_series('phase2_low_time'), errors='coerce'),
@@ -340,8 +415,7 @@ try:
             })
 
             raw_df['曜日'] = raw_df['日付'].dt.weekday.map(weekday_map)
-            liquidated_flag = _series('liquidated', pd.Series([False] * len(detail_df), index=detail_df.index)).fillna(False).astype(bool)
-            raw_df['ロスカット'] = liquidated_flag | raw_df['シンボル'].str.contains('❌', na=False)
+            raw_df['ロスカット'] = _series('is_loss_cut_ui', pd.Series([False] * len(detail_df), index=detail_df.index)).fillna(False).astype(bool)
             raw_df['最高値建値差_raw'] = raw_df['最高値価格_raw'] - raw_df['建値_raw']
             raw_df['最底値建値差_raw'] = raw_df['最底値価格_raw'] - raw_df['建値_raw']
 
@@ -529,15 +603,18 @@ try:
         st.subheader("統計情報")
 
         st.markdown("#### シンボル別集計")
+        symbol_counts_source = ui_results_df if len(ui_results_df) > 0 else pd.DataFrame(results)
+        symbol_series = safe_series(symbol_counts_source, 'symbol', '-').fillna('-').astype(str)
+        symbol_counts = symbol_series.value_counts().to_dict()
         symbol_df = pd.DataFrame([
-            [k, v, f"{v/stats['total']*100:.1f}%"]
-            for k, v in sorted(stats['symbol_counts'].items(), key=lambda x: -x[1])
+            [k, v, f"{v/max(stats['total'], 1)*100:.1f}%"]
+            for k, v in sorted(symbol_counts.items(), key=lambda x: -x[1])
         ], columns=['シンボル', '回数', '割合'])
         st.dataframe(symbol_df, use_container_width=True)
 
         st.markdown("#### パラメータ")
         param_df = pd.DataFrame({
-            "項目": ["レバレッジ", "ポジション証拠金", "追加証拠金", "合計証拠金", "閾値（分）", "判定期間"],
+            "項目": ["レバレッジ", "ポジション証拠金", "追加証拠金", "合計証拠金", "閾値（分）", "判定期間", "建値の基準", "ロスカット基準"],
             "値": [
                 f"{leverage}x",
                 f"${position_margin:.0f}",
@@ -545,6 +622,8 @@ try:
                 f"${position_margin + additional_margin:.0f}",
                 f"{DEFAULT_THRESHOLD_MIN}分",
                 judgment_period_label,
+                entry_mode,
+                f"{loss_cut_mode}{f'（{loss_cut_tolerance_pct:.1f}%）' if loss_cut_mode == '許容率を指定' else ''}",
             ],
         })
         st.dataframe(param_df, use_container_width=True)
@@ -568,7 +647,7 @@ try:
         if len(results) > 0:
             st.markdown("---")
 
-            s4 = pd.DataFrame(results)
+            s4 = ui_results_df.copy()
             weekday_map4 = {0: '月', 1: '火', 2: '水', 3: '木', 4: '金', 5: '土', 6: '日'}
             s4['曜日'] = pd.to_datetime(s4['date']).dt.weekday.map(weekday_map4)
 
@@ -608,14 +687,8 @@ try:
             s4['breach_elapsed'] = elapsed_min(s4['breach_time'],      s4['reference_open_time'])
 
             # 値幅
-            s4['high_diff'] = (
-                pd.to_numeric(s4['phase2_high'] if 'phase2_high' in s4.columns else None, errors='coerce') -
-                pd.to_numeric(s4['entry']       if 'entry'       in s4.columns else None, errors='coerce')
-            )
-            s4['low_diff'] = (
-                pd.to_numeric(s4['phase2_low'] if 'phase2_low' in s4.columns else None, errors='coerce') -
-                pd.to_numeric(s4['entry']      if 'entry'      in s4.columns else None, errors='coerce')
-            )
+            s4['high_diff'] = pd.to_numeric(safe_series(s4, 'high_diff_ui'), errors='coerce')
+            s4['low_diff'] = pd.to_numeric(safe_series(s4, 'low_diff_ui'), errors='coerce')
 
             # ── 曜日別シンボル出現数 ──────────────────────
             st.markdown("#### 曜日別シンボル出現数")
