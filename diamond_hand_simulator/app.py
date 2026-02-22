@@ -6,14 +6,18 @@ from core.logic import judge_all, calculate_statistics, DEFAULT_THRESHOLD_MIN, D
 from core.liquidation import create_liquidation_model
 from pathlib import Path
 
+
 APP_DIR = Path(__file__).resolve().parent
+
 
 st.set_page_config(page_title="ゴールド戦略シミュレータ", page_icon="💎", layout="wide")
 st.title("💎 ゴールド戦略シミュレータ")
 st.markdown("レバレッジ500倍×閉場前ポジション戦略の分析ツール")
 
+
 # サイドバー：パラメータ設定
 st.sidebar.header("⚙️ 設定")
+
 
 leverage = st.sidebar.number_input(
     "レバレッジ倍率",
@@ -24,6 +28,7 @@ leverage = st.sidebar.number_input(
     help="ポジションのレバレッジ倍率"
 )
 
+
 position_margin = st.sidebar.number_input(
     "ポジション証拠金（USD）",
     min_value=1.0,
@@ -32,6 +37,7 @@ position_margin = st.sidebar.number_input(
     step=10.0,
     help="ポジションを持つために必要な証拠金"
 )
+
 
 additional_margin = st.sidebar.number_input(
     "追加証拠金（USD）",
@@ -42,14 +48,17 @@ additional_margin = st.sidebar.number_input(
     help="ロスカット回避のための追加証拠金"
 )
 
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📊 取引所設定")
 exchange = st.sidebar.selectbox("取引所", ["BingX"])
+
 
 # 判定期間の選択
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ⏰ 判定設定")
 st.sidebar.info(f"開場後 **{DEFAULT_THRESHOLD_MIN}分** で判定（固定）")
+
 
 # 判定期間のプルダウン
 judgment_options = {
@@ -78,22 +87,21 @@ judgment_options = {
     "1時間後まで": 1,
 }
 
+
 judgment_period_label = st.sidebar.selectbox(
     "判定期間",
     options=list(judgment_options.keys()),
-    index=0,  # デフォルトは「次の閉場まで」
+    index=0,
     help="ポジション保有期間（この時間後の結果で判定）"
 )
 
+
 judgment_hours = judgment_options[judgment_period_label]
+
 
 # データ読み込み
 @st.cache_data
 def load_data(threshold_min=2, judgment_hours=None):
-    """
-    指定された判定条件のファイルを読み込む（B案: ファイル分割版）
-    """
-    # ファイル名を生成
     if judgment_hours is None:
         j_label = 'close'
     else:
@@ -109,14 +117,14 @@ def load_data(threshold_min=2, judgment_hours=None):
         )
 
     df = pd.read_parquet(path)
-    
+
     st.sidebar.info(f"Aggregates file: {path}")
-    
+
     return df
+
 
 @st.cache_data
 def load_1min_data():
-    """1分足データを読み込み"""
     path = APP_DIR / "data" / "raw" / "gold_1min_20251101_.csv"
     df = pd.read_csv(path, parse_dates=['日時'])
     df = df.rename(columns={
@@ -129,8 +137,8 @@ def load_1min_data():
     df.set_index('timestamp', inplace=True)
     return df
 
+
 def _exchange_config_signature():
-    """モデル設定の変更をキャッシュキーに反映するためのシグネチャ。"""
     config_path = APP_DIR / "config" / "exchanges" / "bingx.yaml"
     return config_path.read_text(encoding='utf-8')
 
@@ -140,8 +148,8 @@ def load_model(config_signature):
     _ = config_signature
     return create_liquidation_model()
 
+
 try:
-    # 選択された判定期間に応じたファイルを読み込む
     df = load_data(
         threshold_min=DEFAULT_THRESHOLD_MIN,
         judgment_hours=judgment_hours
@@ -155,29 +163,25 @@ try:
     # TierMM の場合、mm_rate を確実に計算させて表示する
     info = model.get_info() if hasattr(model, "get_info") else {}
     if info.get("model") == "TierMM":
-        # 目安表示の計算を1回走らせて current_mm_rate を更新させる
         _ = model.calc_liq_distance_pct(
             leverage=leverage,
             position_margin=position_margin,
             additional_margin=additional_margin,
-            entry_price=5000,  # 目安用の基準価格（既存の基準変数があるならそれに置換）
+            entry_price=5000,
         )
         mm_rate = getattr(model, "current_mm_rate", None)
         notional = getattr(model, "current_notional", None)
         if mm_rate is not None:
             st.sidebar.caption(f"TierMM: mm_rate={mm_rate*100:.3f}%  notional≈{notional:,.0f}")
 
-
     # ロスカット目安を表示
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📉 ロスカット目安")
     entry_sample = 5000.0
 
-    # 追加証拠金なしの場合
     liq_price_base = model.calc_liq_price_long(entry_sample, leverage, position_margin, 0)
     liq_distance_pct_base = model.calc_liq_distance_pct(leverage, position_margin, 0)
 
-    # 追加証拠金ありの場合
     liq_price_with_add = model.calc_liq_price_long(entry_sample, leverage, position_margin, additional_margin)
     liq_distance_pct_with_add = model.calc_liq_distance_pct(leverage, position_margin, additional_margin)
 
@@ -245,7 +249,6 @@ try:
 
                 month_data = results_df[results_df['year_month'] == ym]
 
-                # 月曜始まりのカレンダーを作成
                 cal = calendar.monthcalendar(year, month)
                 weekdays = ['月', '火', '水', '木', '金', '土', '日']
 
@@ -268,7 +271,6 @@ try:
                                 detail = day_result.iloc[0]['detail']
                                 info = day_result.iloc[0]['info']
 
-                                # ❌の場合はロスカット時間を表示
                                 if '❌' in symbol and info and 'liq_time' in info:
                                     liq_time = info['liq_time']
                                     if pd.notna(liq_time):
@@ -276,7 +278,6 @@ try:
                                         display_text = f'{symbol}<br><small>{time_str}</small>'
                                     else:
                                         display_text = symbol
-                                # ✅, 🟠の場合は建値割れ時刻を表示
                                 elif ('✅' in symbol or '🟠' in symbol or '💎' in symbol) and info and 'breach_time' in info:
                                     breach_time = info['breach_time']
                                     if pd.notna(breach_time):
@@ -290,7 +291,6 @@ try:
                                 table_html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: center;" title="{detail}">'
                                 table_html += f'<div style="font-weight: bold;">{day}</div><div style="font-size: 18px;">{display_text}</div></td>'
                             else:
-                                # データがない日は「休場」と表示（グレー）
                                 table_html += f'<td style="border: 1px solid #ddd; padding: 8px; text-align: center; color: #999;">'
                                 table_html += f'<div style="font-weight: bold;">{day}</div><div style="font-size: 12px;">休場</div></td>'
 
@@ -324,11 +324,19 @@ try:
                 '最高値価格_raw': pd.to_numeric(_series('phase2_high'), errors='coerce'),
                 '最底値時刻_raw': pd.to_datetime(_series('phase2_low_time'), errors='coerce'),
                 '最底値価格_raw': pd.to_numeric(_series('phase2_low'), errors='coerce'),
-                '上方向値幅_raw': pd.to_numeric(_series('move_vs_entry'), errors='coerce'),
-                '下方向値幅_raw': pd.to_numeric(_series('low_move_vs_entry'), errors='coerce'),
                 'skip_minutes_raw': pd.to_numeric(_series('skip_minutes', pd.Series([0] * len(detail_df), index=detail_df.index)), errors='coerce').fillna(0),
                 'used_tier_index_raw': pd.to_numeric(_series('used_tier_index'), errors='coerce'),
                 'detail_raw': _series('detail', pd.Series([''] * len(detail_df), index=detail_df.index)).fillna('').astype(str),
+                'liq_time_raw': pd.to_datetime(
+                    detail_df.get('info', pd.Series([{}] * len(detail_df), index=detail_df.index))
+                    .apply(lambda x: x.get('liq_time') if isinstance(x, dict) else None),
+                    errors='coerce'
+                ),
+                'breach_time_raw': pd.to_datetime(
+                    detail_df.get('info', pd.Series([{}] * len(detail_df), index=detail_df.index))
+                    .apply(lambda x: x.get('breach_time') if isinstance(x, dict) else None),
+                    errors='coerce'
+                ),
             })
 
             raw_df['曜日'] = raw_df['日付'].dt.weekday.map(weekday_map)
@@ -366,19 +374,19 @@ try:
                 tier_min, tier_max = 0, 0
 
             with filter_col3:
-                tier_range = st.slider(
-                    "used_tier_index 範囲",
-                    min_value=tier_min,
-                    max_value=tier_max,
-                    value=(tier_min, tier_max),
-                    key="detail_filter_tier_range",
-                )
+                if tier_min >= tier_max:
+                    st.caption(f"Tier: {tier_min}（1種類のみ）")
+                    tier_range = (tier_min, tier_max)
+                else:
+                    tier_range = st.slider(
+                        "used_tier_index 範囲",
+                        min_value=tier_min,
+                        max_value=tier_max,
+                        value=(tier_min, tier_max),
+                        key="detail_filter_tier_range",
+                    )
 
-            check_col1, check_col2 = st.columns(2)
-            with check_col1:
-                only_skip = st.checkbox("skip_minutes > 0 のみ", key="detail_filter_only_skip")
-            with check_col2:
-                only_liq = st.checkbox("ロスカット日のみ", key="detail_filter_only_liq")
+            only_skip = st.checkbox("skip_minutes > 0 のみ", key="detail_filter_only_skip")
 
             filtered_df = raw_df.copy()
             if selected_symbols:
@@ -398,44 +406,6 @@ try:
             if only_skip:
                 filtered_df = filtered_df[filtered_df['skip_minutes_raw'] > 0]
 
-            if only_liq:
-                filtered_df = filtered_df[filtered_df['ロスカット']]
-
-            # --- ソート ---
-            sort_columns = {
-                '日付': '日付',
-                '曜日': '曜日',
-                'シンボル': 'シンボル',
-                '建値': '建値_raw',
-                '最高値時刻': '最高値時刻_raw',
-                '最高値価格': '最高値価格_raw',
-                '最高値建値差': '最高値建値差_raw',
-                '最底値時刻': '最底値時刻_raw',
-                '最底値価格': '最底値価格_raw',
-                '最底値建値差': '最底値建値差_raw',
-                '上方向値幅': '上方向値幅_raw',
-                '下方向値幅': '下方向値幅_raw',
-                'skip_minutes': 'skip_minutes_raw',
-                'used_tier_index': 'used_tier_index_raw',
-                'ロスカット': 'ロスカット',
-                '詳細': 'detail_raw',
-            }
-            sort_col1, sort_col2 = st.columns([3, 1])
-            with sort_col1:
-                sort_label = st.selectbox(
-                    "ソート列（非表示列も選択可）",
-                    options=list(sort_columns.keys()),
-                    key="detail_sort_column",
-                )
-            with sort_col2:
-                sort_ascending = st.checkbox("昇順", value=False, key="detail_sort_ascending")
-
-            filtered_df = filtered_df.sort_values(
-                by=sort_columns[sort_label],
-                ascending=sort_ascending,
-                na_position='last',
-            )
-
             # --- 表示整形 ---
             def format_price(value):
                 if pd.isna(value):
@@ -453,12 +423,6 @@ try:
                 sign = '+' if value >= 0 else '-'
                 return f"{sign}{abs(value):,.2f}"
 
-            def format_move(value):
-                if pd.isna(value):
-                    return "-"
-                sign = '+' if value >= 0 else '-'
-                return f"{sign}{abs(value):,.2f}"
-
             def append_skip_detail(detail, skip_minutes):
                 if pd.isna(skip_minutes) or skip_minutes <= 0:
                     return detail
@@ -470,11 +434,11 @@ try:
                     return f"{base_detail} | {append_text}"
                 return append_text
 
-            q_up = filtered_df['上方向値幅_raw'].abs().quantile(0.95) if len(filtered_df) else pd.NA
-            q_down = filtered_df['下方向値幅_raw'].abs().quantile(0.95) if len(filtered_df) else pd.NA
+            q_up = filtered_df['最高値建値差_raw'].abs().quantile(0.95) if len(filtered_df) else pd.NA
+            q_down = filtered_df['最底値建値差_raw'].abs().quantile(0.95) if len(filtered_df) else pd.NA
             filtered_df['_is_outlier'] = (
-                filtered_df['上方向値幅_raw'].abs().ge(q_up).fillna(False)
-                | filtered_df['下方向値幅_raw'].abs().ge(q_down).fillna(False)
+                filtered_df['最高値建値差_raw'].abs().ge(q_up).fillna(False)
+                | filtered_df['最底値建値差_raw'].abs().ge(q_down).fillna(False)
             ) if len(filtered_df) else False
 
             display_df = pd.DataFrame({
@@ -488,8 +452,6 @@ try:
                 '最底値時刻': filtered_df['最底値時刻_raw'].apply(format_time),
                 '最底値価格': filtered_df['最底値価格_raw'].apply(format_price),
                 '最底値建値差': filtered_df['最底値建値差_raw'].apply(format_diff),
-                '上方向値幅': filtered_df['上方向値幅_raw'].apply(format_move),
-                '下方向値幅': filtered_df['下方向値幅_raw'].apply(format_move),
                 'skip_minutes': filtered_df['skip_minutes_raw'].fillna(0).astype(int),
                 'used_tier_index': filtered_df['used_tier_index_raw'].apply(lambda x: '-' if pd.isna(x) else int(x)),
                 'ロスカット': filtered_df['ロスカット'].map({True: 'あり', False: '-'}),
@@ -499,22 +461,12 @@ try:
                 ],
             })
 
-            st.markdown(
-                "**表示条件** "
-                f"シンボル: {', '.join(selected_symbols) if selected_symbols else '(未選択)'} / "
-                f"曜日: {', '.join(selected_weekdays) if selected_weekdays else '(未選択)'} / "
-                f"skip: {'ON' if only_skip else 'OFF'} / "
-                f"ロスカ: {'ON' if only_liq else 'OFF'} / "
-                f"ティア: {tier_range[0]} - {tier_range[1]}"
-            )
-            st.caption(f"表示件数: {len(display_df)} / {len(raw_df)}")
-
             # 列プリセット / 表示トグル
             all_display_columns = list(display_df.columns)
             preset_map = {
-                '一覧': ['日付', '曜日', 'シンボル', '建値', '上方向値幅', '下方向値幅', 'ロスカット', '詳細'],
-                '分析': ['日付', '曜日', 'シンボル', '建値', '最高値時刻', '最高値価格', '最高値建値差', '最底値時刻', '最底値価格', '最底値建値差', '上方向値幅', '下方向値幅', 'skip_minutes', 'used_tier_index'],
-                '詳細': all_display_columns,
+                '簡易': ['日付', '曜日', 'シンボル', '詳細'],
+                '詳細': ['日付', '曜日', 'シンボル', '建値', '最高値時刻', '最高値価格', '最高値建値差', '最底値時刻', '最底値価格', '最底値建値差', '詳細'],
+                '全表示': all_display_columns,
             }
 
             preset = st.radio(
@@ -540,7 +492,7 @@ try:
                 "表示列トグル",
                 options=all_display_columns,
                 key="visible_columns",
-                help="列を個別に ON/OFF できます。非表示列でもソート可能です。",
+                help="列を個別に ON/OFF できます。",
             )
 
             visible_columns = [c for c in st.session_state.get("visible_columns", []) if c in all_display_columns]
@@ -567,11 +519,11 @@ try:
                 styled_df = (
                     visible_df.style
                     .apply(highlight_row, axis=1)
-                    .applymap(color_move, subset=[c for c in ['上方向値幅', '下方向値幅'] if c in visible_df.columns])
+                    .applymap(color_move, subset=[c for c in ['最高値建値差', '最底値建値差'] if c in visible_df.columns])
                 )
 
                 nonce_key = f"detail_table_{st.session_state['detail_table_nonce']}"
-                st.dataframe(styled_df, use_container_width=True, height=600, key=nonce_key)
+                st.dataframe(styled_df, use_container_width=True, height=600, key=nonce_key, column_order=visible_columns)
 
     with tab3:
         st.subheader("統計情報")
@@ -597,7 +549,7 @@ try:
         })
         st.dataframe(param_df, use_container_width=True)
 
-        # ---- ロスカットモデル情報（DataFrameの外で表示）----
+        # ---- ロスカットモデル情報 ----
         if hasattr(model, "adjustment_factor"):
             st.write(f"Adjustment Factor: {model.adjustment_factor * 100:.4f}%")
         else:
@@ -612,6 +564,103 @@ try:
             else:
                 st.write("TierMMModel: mm_rate not computed yet (run a calculation first)")
 
+        # ─── Phase4: 傾向統計 ────────────────────────────
+        if len(results) > 0:
+            st.markdown("---")
+
+            s4 = pd.DataFrame(results)
+            weekday_map4 = {0: '月', 1: '火', 2: '水', 3: '木', 4: '金', 5: '土', 6: '日'}
+            s4['曜日'] = pd.to_datetime(s4['date']).dt.weekday.map(weekday_map4)
+
+            # reference_open_time を df から結合（経過時間計算に使用）
+            df_ref = df[['date', 'reference_open_time']].copy()
+            df_ref['_date_str'] = df_ref['date'].astype(str)
+            s4['_date_str'] = pd.to_datetime(s4['date']).dt.strftime('%Y-%m-%d')
+            s4 = s4.merge(
+                df_ref[['_date_str', 'reference_open_time']],
+                on='_date_str', how='left'
+            )
+            s4['reference_open_time'] = pd.to_datetime(s4['reference_open_time'], errors='coerce')
+
+            # 各イベント時刻を整備
+            s4['phase2_high_time'] = pd.to_datetime(
+                s4['phase2_high_time'] if 'phase2_high_time' in s4.columns else pd.NaT,
+                errors='coerce'
+            )
+            s4['phase2_low_time'] = pd.to_datetime(
+                s4['phase2_low_time'] if 'phase2_low_time' in s4.columns else pd.NaT,
+                errors='coerce'
+            )
+            info_col = s4['info'] if 'info' in s4.columns else pd.Series([{}] * len(s4), index=s4.index)
+            s4['liq_time']    = pd.to_datetime(info_col.apply(lambda x: x.get('liq_time')    if isinstance(x, dict) else None), errors='coerce')
+            s4['breach_time'] = pd.to_datetime(info_col.apply(lambda x: x.get('breach_time') if isinstance(x, dict) else None), errors='coerce')
+
+            # 開場からの経過時間（分）を計算
+            def elapsed_min(ts_col, ref_col):
+                return (
+                    pd.to_datetime(ts_col, errors='coerce') -
+                    pd.to_datetime(ref_col, errors='coerce')
+                ).dt.total_seconds() / 60
+
+            s4['high_elapsed']   = elapsed_min(s4['phase2_high_time'], s4['reference_open_time'])
+            s4['low_elapsed']    = elapsed_min(s4['phase2_low_time'],  s4['reference_open_time'])
+            s4['liq_elapsed']    = elapsed_min(s4['liq_time'],         s4['reference_open_time'])
+            s4['breach_elapsed'] = elapsed_min(s4['breach_time'],      s4['reference_open_time'])
+
+            # 値幅
+            s4['high_diff'] = (
+                pd.to_numeric(s4['phase2_high'] if 'phase2_high' in s4.columns else None, errors='coerce') -
+                pd.to_numeric(s4['entry']       if 'entry'       in s4.columns else None, errors='coerce')
+            )
+            s4['low_diff'] = (
+                pd.to_numeric(s4['phase2_low'] if 'phase2_low' in s4.columns else None, errors='coerce') -
+                pd.to_numeric(s4['entry']      if 'entry'      in s4.columns else None, errors='coerce')
+            )
+
+            # ── 曜日別シンボル出現数 ──────────────────────
+            st.markdown("#### 曜日別シンボル出現数")
+            wd_cross = s4.groupby(['曜日', 'symbol']).size().unstack(fill_value=0)
+            wd_order = [w for w in ['月', '火', '水', '木', '金'] if w in wd_cross.index]
+            st.dataframe(wd_cross.reindex(wd_order), use_container_width=True)
+
+            # ── 曜日別値幅統計 ────────────────────────────
+            st.markdown("#### 曜日別 値幅統計（建値差）")
+            wd_range = s4.groupby('曜日').agg(
+                件数            =('high_diff', 'count'),
+                最高値建値差_平均=('high_diff', 'mean'),
+                最高値建値差_最大=('high_diff', 'max'),
+                最底値建値差_平均=('low_diff',  'mean'),
+                最底値建値差_最小=('low_diff',  'min'),
+            ).round(2)
+            wd_range = wd_range.reindex([w for w in ['月', '火', '水', '木', '金'] if w in wd_range.index])
+            st.dataframe(wd_range, use_container_width=True)
+
+            # ── 開場からの経過時間 目安 ───────────────────
+            st.markdown("#### 開場からの経過時間 目安")
+            st.caption("reference_open_time（実際の基準足）からの経過分数")
+
+            def elapsed_summary(col, label):
+                s = s4[col].dropna()
+                if len(s) == 0:
+                    return {'イベント': label, '件数': 0, '中央値': '-', '平均': '-', '25%ile': '-', '75%ile': '-', '最小': '-', '最大': '-'}
+                return {
+                    'イベント': label,
+                    '件数':   len(s),
+                    '中央値': f"{s.median():.0f}分",
+                    '平均':   f"{s.mean():.0f}分",
+                    '25%ile': f"{s.quantile(0.25):.0f}分",
+                    '75%ile': f"{s.quantile(0.75):.0f}分",
+                    '最小':   f"{s.min():.0f}分",
+                    '最大':   f"{s.max():.0f}分",
+                }
+
+            elapsed_df = pd.DataFrame([
+                elapsed_summary('high_elapsed',   '最高値を記録'),
+                elapsed_summary('low_elapsed',    '最底値を記録'),
+                elapsed_summary('liq_elapsed',    'ロスカット発生'),
+                elapsed_summary('breach_elapsed', '建値割れ発生'),
+            ])
+            st.dataframe(elapsed_df, use_container_width=True, hide_index=True)
 
 
 except FileNotFoundError as e:
@@ -619,7 +668,6 @@ except FileNotFoundError as e:
     st.info("💡 build_daily_aggregates.py を実行してデータを生成してください。")
 
 except Exception as e:
-    # エラー詳細を表示
     st.error(f"エラーが発生しました: {e}")
     import traceback
     st.code(traceback.format_exc())
