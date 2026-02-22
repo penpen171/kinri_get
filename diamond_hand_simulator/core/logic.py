@@ -19,6 +19,16 @@ def append_open_bar_skip_detail(detail, skip_minutes):
     return detail
 
 
+def _build_tiermm_usage(liq_model):
+    return {
+        'used_notional': getattr(liq_model, 'current_notional', None),
+        'used_mm_rate': getattr(liq_model, 'current_mm_rate', None),
+        'used_tier_index': getattr(liq_model, 'current_tier_index', None),
+        'used_tier_min_notional': getattr(liq_model, 'current_tier_min_notional', None),
+        'used_tier_max_notional': getattr(liq_model, 'current_tier_max_notional', None),
+    }
+
+
 def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df_1min=None):
     """
     1日分のデータを判定（高速化版）
@@ -109,7 +119,8 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'phase2_high_time': phase2_high_time,
             'phase2_low': phase2_low,
             'phase2_low_time': phase2_low_time,
-            'skip_minutes': skip_minutes
+            'skip_minutes': skip_minutes,
+            **_build_tiermm_usage(liq_model),
         }
 
     # ===== 第2ロジック：閾値以降〜判定終了時刻での判定 =====
@@ -195,7 +206,8 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'phase2_high_time': phase2_high_time,
             'phase2_low': phase2_low,
             'phase2_low_time': phase2_low_time,
-            'skip_minutes': skip_minutes
+            'skip_minutes': skip_minutes,
+            **_build_tiermm_usage(liq_model),
         }
 
     elif position_type == 'SHORT':
@@ -227,7 +239,8 @@ def judge_day(row, liq_model, leverage, position_margin, additional_margin=0, df
             'phase2_high_time': phase2_high_time,
             'phase2_low': phase2_low,
             'phase2_low_time': phase2_low_time,
-            'skip_minutes': skip_minutes
+            'skip_minutes': skip_minutes,
+            **_build_tiermm_usage(liq_model),
         }
 
 
